@@ -1,6 +1,6 @@
-import Tool from '../../models/Tool.js';
+import Tool from '../models/Tool.js';
 import dotenv from 'dotenv';
-import logger from '../../logger.js';
+import logger from '../logger.js';
 
 dotenv.config();
 import {
@@ -19,15 +19,13 @@ import {
     GetInsightSelectorsCommand
 } from "@aws-sdk/client-cloudtrail";
 
-import { accountCredentials, defaultRegion } from '../config/awsConfig.js';
-
 class CloudTrailTool extends Tool {
     constructor(name, description, parameters) {
         super(name, description, parameters);
     }
 
-    async executeWithCommand({ command, account, region }) {
-        const cloudTrailClient = this.getCloudTrailClient(account, region);
+    async executeWithCommand({ command, region }) {
+        const cloudTrailClient = this.getCloudTrailClient(region);
         try {
             const response = await cloudTrailClient.send(command);
             return response;
@@ -37,44 +35,25 @@ class CloudTrailTool extends Tool {
         }
     }
 
-    getCloudTrailClient(account, region) {
-        const validAccounts = Object.keys(accountCredentials);
-        if (!validAccounts.includes(account)) {
-            throw new Error(`Invalid account. Must be one of: ${validAccounts.join(', ')}`);
-        }
-
-        const credentials = accountCredentials[account];
-        if (!credentials) {
-            throw new Error(`No credentials found for account: ${account}`);
-        }
-
+    getCloudTrailClient(region) {
         return new CloudTrailClient({
-            region: region || defaultRegion,
-            credentials,
+            region: region || process.env.AWS_DEFAULT_REGION,
             maxAttempts: 3,
             requestTimeout: 5000
         });
     }
 }
 
-const account = { 
-    type: 'string', 
-    description: 'The AWS account to use. One of "caredove-dev" or "caredove-prod".', 
-    default: 'caredove-dev' 
-};
-const region = { 
-    type: 'string', 
-    description: 'The AWS region to use. This is probably ca-central-1 (default), unless otherwise specified.', 
-    default: 'ca-central-1' 
-};
-
 export class GetInsightSelectors extends CloudTrailTool {
     constructor() {
         super('GetInsightSelectors', 'Describes the settings for the Insights event selectors configured for a trail or event data store.', {
             type: 'object',
             properties: {
-                account,
-                region,
+                region: { 
+                    type: 'string', 
+                    description: 'The AWS region to use. This is probably ca-central-1 (default), unless otherwise specified.', 
+                    default: 'ca-central-1' 
+                },
                 TrailName: {
                     type: 'string',
                     description: 'The name of the trail or trail ARN. Must meet specific naming requirements if a name is provided.'
@@ -84,21 +63,14 @@ export class GetInsightSelectors extends CloudTrailTool {
                     description: 'The ARN or ID suffix of the ARN of the event data store for which to get Insights selectors.'
                 },
             },
-            required: ['account', 'region']
+            required: ['region']
         });
     }
 
     async call(id, args, context, streamManager, user) {
         try {
-            const { account, region, TrailName, EventDataStore } = args;
+            const { region, TrailName, EventDataStore } = args;
             
-            // Emit initial progress
-            user.emit('tool.output.chunk', {
-                object: 'tool.output.chunk',
-                toolCallId: id,
-                data: `Retrieving Insight selectors for ${TrailName || EventDataStore} in account ${account} and region ${region}...`
-            });
-
             // Validate input: Either TrailName or EventDataStore must be provided, but not both
             if ((TrailName && EventDataStore) || (!TrailName && !EventDataStore)) {
                 throw new Error('You must specify either TrailName or EventDataStore, but not both.');
@@ -109,24 +81,12 @@ export class GetInsightSelectors extends CloudTrailTool {
             if (EventDataStore) input.EventDataStore = EventDataStore;
 
             const command = new GetInsightSelectorsCommand(input);
-            const response = await this.executeWithCommand({ command, account, region });
-
-            // Emit response data
-            user.emit('tool.output.chunk', {
-                object: 'tool.output.chunk',
-                toolCallId: id,
-                data: JSON.stringify(response, null, 2)
-            });
+            const response = await this.executeWithCommand({ command, region });
 
             return response;
 
         } catch (error) {
             logger.error(`Error retrieving Insight selectors: ${error.message}`);
-            user.emit('tool.error', {
-                object: 'tool.error',
-                toolCallId: id,
-                data: error.message
-            });
             throw error;
         }
     }
@@ -137,8 +97,11 @@ export class SearchSampleQueries extends CloudTrailTool {
         super('SearchSampleQueries', 'Searches sample queries and returns a list of sample queries sorted by relevance.', {
             type: 'object',
             properties: {
-                account,
-                region,
+                region: { 
+                    type: 'string', 
+                    description: 'The AWS region to use. This is probably ca-central-1 (default), unless otherwise specified.', 
+                    default: 'ca-central-1' 
+                },
                 SearchPhrase: {
                     type: 'string',
                     description: 'The natural language phrase in English to use for the semantic search.'
@@ -152,21 +115,14 @@ export class SearchSampleQueries extends CloudTrailTool {
                     description: 'A token to retrieve the next page of results.'
                 },
             },
-            required: ['account', 'region', 'SearchPhrase']
+            required: ['region', 'SearchPhrase']
         });
     }
 
     async call(id, args, context, streamManager, user) {
         try {
-            const { account, region, SearchPhrase, MaxResults, NextToken } = args;
+            const { region, SearchPhrase, MaxResults, NextToken } = args;
             
-            // Emit initial progress
-            user.emit('tool.output.chunk', {
-                object: 'tool.output.chunk',
-                toolCallId: id,
-                data: `Searching sample queries with phrase "${SearchPhrase}" in account ${account} and region ${region}...`
-            });
-
             // Validate input: SearchPhrase is required
             if (!SearchPhrase) {
                 throw new Error('SearchPhrase must be specified.');
@@ -179,24 +135,12 @@ export class SearchSampleQueries extends CloudTrailTool {
             if (NextToken) input.NextToken = NextToken;
 
             const command = new SearchSampleQueriesCommand(input);
-            const response = await this.executeWithCommand({ command, account, region });
-
-            // Emit response data
-            user.emit('tool.output.chunk', {
-                object: 'tool.output.chunk',
-                toolCallId: id,
-                data: JSON.stringify(response, null, 2)
-            });
+            const response = await this.executeWithCommand({ command, region });
 
             return response;
 
         } catch (error) {
             logger.error(`Error searching sample queries: ${error.message}`);
-            user.emit('tool.error', {
-                object: 'tool.error',
-                toolCallId: id,
-                data: error.message
-            });
             throw error;
         }
     }
@@ -207,8 +151,11 @@ export class LookupCloudTrailEvents extends CloudTrailTool {
       super('LookupCloudTrailEvents', 'Looks up management or CloudTrail Insights events captured by CloudTrail.', {
         type: 'object',
         properties: {
-          account,
-          region,
+          region: { 
+              type: 'string', 
+              description: 'The AWS region to use. This is probably ca-central-1 (default), unless otherwise specified.', 
+              default: 'ca-central-1' 
+          },
           LookupAttributes: {
             type: 'array',
             items: {
@@ -251,14 +198,13 @@ export class LookupCloudTrailEvents extends CloudTrailTool {
           },
         },
         // No longer require EventDataStore. 
-        required: ['account', 'region']
+        required: ['region']
       });
     }
   
     async call(id, args, context, streamManager, user) {
       try {
         const {
-          account,
           region,
           LookupAttributes,
           StartTime,
@@ -267,13 +213,6 @@ export class LookupCloudTrailEvents extends CloudTrailTool {
           MaxResults,
           NextToken
         } = args;
-  
-        // Emit initial progress
-        user.emit('tool.output.chunk', {
-          object: 'tool.output.chunk',
-          toolCallId: id,
-          data: `Looking up CloudTrail events in account ${account}, region ${region}...`
-        });
   
         // Validate enum values for AttributeKey
         const validAttributeKeys = [
@@ -321,24 +260,12 @@ export class LookupCloudTrailEvents extends CloudTrailTool {
   
         // Use the LookupEventsCommand (for the free 90-day event history)
         const command = new LookupEventsCommand(input);
-        const response = await this.executeWithCommand({ command, account, region });
-  
-        // Emit response data
-        user.emit('tool.output.chunk', {
-          object: 'tool.output.chunk',
-          toolCallId: id,
-          data: JSON.stringify(response, null, 2)
-        });
+        const response = await this.executeWithCommand({ command, region });
   
         return response;
   
       } catch (error) {
         logger.error(`Error looking up events: ${error.message}`);
-        user.emit('tool.error', {
-          object: 'tool.error',
-          toolCallId: id,
-          data: error.message
-        });
         throw error;
       }
     }
@@ -349,8 +276,11 @@ export class ListInsightsMetricData extends CloudTrailTool {
         super('ListInsightsMetricData', 'Returns Insights metrics data for trails that have enabled Insights.', {
             type: 'object',
             properties: {
-                account,
-                region,
+                region: { 
+                    type: 'string', 
+                    description: 'The AWS region to use. This is probably ca-central-1 (default), unless otherwise specified.', 
+                    default: 'ca-central-1' 
+                },
                 EventSource: {
                     type: 'string',
                     description: 'The AWS service to which the request was made, such as iam.amazonaws.com or s3.amazonaws.com.'
@@ -394,21 +324,14 @@ export class ListInsightsMetricData extends CloudTrailTool {
                     description: 'A token to retrieve the next page of query results.'
                 },
             },
-            required: ['account', 'region', 'EventSource', 'EventName', 'InsightType']
+            required: ['region', 'EventSource', 'EventName', 'InsightType']
         });
     }
 
     async call(id, args, context, streamManager, user) {
         try {
-            const { account, region, EventSource, EventName, InsightType, ErrorCode, StartTime, EndTime, Period, DataType, MaxResults, NextToken } = args;
+            const { region, EventSource, EventName, InsightType, ErrorCode, StartTime, EndTime, Period, DataType, MaxResults, NextToken } = args;
             
-            // Emit initial progress
-            user.emit('tool.output.chunk', {
-                object: 'tool.output.chunk',
-                toolCallId: id,
-                data: `Listing Insights metric data for EventSource: ${EventSource}, EventName: ${EventName}, InsightType: ${InsightType} in account ${account} and region ${region}...`
-            });
-
             // Validate input: ErrorCode is required if InsightType is ApiErrorRateInsight
             if (InsightType === 'ApiErrorRateInsight' && !ErrorCode) {
                 throw new Error('ErrorCode must be specified when InsightType is ApiErrorRateInsight.');
@@ -434,24 +357,12 @@ export class ListInsightsMetricData extends CloudTrailTool {
             if (NextToken) input.NextToken = NextToken;
 
             const command = new ListInsightsMetricDataCommand(input);
-            const response = await this.executeWithCommand({ command, account, region });
-
-            // Emit response data
-            user.emit('tool.output.chunk', {
-                object: 'tool.output.chunk',
-                toolCallId: id,
-                data: JSON.stringify(response, null, 2)
-            });
+            const response = await this.executeWithCommand({ command, region });
 
             return response;
 
         } catch (error) {
             logger.error(`Error listing Insights metric data: ${error.message}`);
-            user.emit('tool.error', {
-                object: 'tool.error',
-                toolCallId: id,
-                data: error.message
-            });
             throw error;
         }
     }
@@ -462,8 +373,11 @@ export class ListQueries extends CloudTrailTool {
         super('ListQueries', 'Returns a list of queries and query statuses for the past seven days.', {
             type: 'object',
             properties: {
-                account,
-                region,
+                region: { 
+                    type: 'string', 
+                    description: 'The AWS region to use. This is probably ca-central-1 (default), unless otherwise specified.', 
+                    default: 'ca-central-1' 
+                },
                 EventDataStore: {
                     type: 'string',
                     description: 'The ARN or the ID suffix of the ARN of an event data store on which queries were run.'
@@ -492,21 +406,14 @@ export class ListQueries extends CloudTrailTool {
                     description: 'The status of queries to return in results.'
                 },
             },
-            required: ['account', 'region', 'EventDataStore']
+            required: ['region', 'EventDataStore']
         });
     }
 
     async call(id, args, context, streamManager, user) {
         try {
-            const { account, region, EventDataStore, NextToken, MaxResults, StartTime, EndTime, QueryStatus } = args;
+            const { region, EventDataStore, NextToken, MaxResults, StartTime, EndTime, QueryStatus } = args;
             
-            // Emit initial progress
-            user.emit('tool.output.chunk', {
-                object: 'tool.output.chunk',
-                toolCallId: id,
-                data: `Listing queries for event data store ${EventDataStore} in account ${account} and region ${region}...`
-            });
-
             // Validate input: EventDataStore is required
             if (!EventDataStore) {
                 throw new Error('EventDataStore must be specified.');
@@ -522,24 +429,12 @@ export class ListQueries extends CloudTrailTool {
             if (QueryStatus) input.QueryStatus = QueryStatus;
 
             const command = new ListQueriesCommand(input);
-            const response = await this.executeWithCommand({ command, account, region });
-
-            // Emit response data
-            user.emit('tool.output.chunk', {
-                object: 'tool.output.chunk',
-                toolCallId: id,
-                data: JSON.stringify(response, null, 2)
-            });
+            const response = await this.executeWithCommand({ command, region });
 
             return response;
 
         } catch (error) {
             logger.error(`Error listing queries: ${error.message}`);
-            user.emit('tool.error', {
-                object: 'tool.error',
-                toolCallId: id,
-                data: error.message
-            });
             throw error;
         }
     }
@@ -550,8 +445,11 @@ export class ListEventDataStores extends CloudTrailTool {
         super('ListEventDataStores', 'Returns information about all event data stores in the account and current Region.', {
             type: 'object',
             properties: {
-                account,
-                region,
+                region: { 
+                    type: 'string', 
+                    description: 'The AWS region to use. This is probably ca-central-1 (default), unless otherwise specified.', 
+                    default: 'ca-central-1' 
+                },
                 MaxResults: {
                     type: 'number',
                     description: 'The maximum number of event data stores to display on a single page.'
@@ -561,44 +459,25 @@ export class ListEventDataStores extends CloudTrailTool {
                     description: 'A token to retrieve the next page of event data store results.'
                 },
             },
-            required: ['account', 'region']
+            required: ['region']
         });
     }
 
     async call(id, args, context, streamManager, user) {
         try {
-            const { account, region, MaxResults, NextToken } = args;
+            const { region, MaxResults, NextToken } = args;
             
-            // Emit initial progress
-            user.emit('tool.output.chunk', {
-                object: 'tool.output.chunk',
-                toolCallId: id,
-                data: `Listing event data stores in account ${account} and region ${region}...`
-            });
-
             const input = {};
             if (MaxResults) input.MaxResults = MaxResults;
             if (NextToken) input.NextToken = NextToken;
 
             const command = new ListEventDataStoresCommand(input);
-            const response = await this.executeWithCommand({ command, account, region });
-
-            // Emit response data
-            user.emit('tool.output.chunk', {
-                object: 'tool.output.chunk',
-                toolCallId: id,
-                data: JSON.stringify(response, null, 2)
-            });
+            const response = await this.executeWithCommand({ command, region });
 
             return response;
 
         } catch (error) {
             logger.error(`Error listing event data stores: ${error.message}`);
-            user.emit('tool.error', {
-                object: 'tool.error',
-                toolCallId: id,
-                data: error.message
-            });
             throw error;
         }
     }
@@ -609,8 +488,11 @@ export class GetCloudTrailQueryResults extends CloudTrailTool {
         super('GetCloudTrailQueryResults', 'Retrieves the event data results of a specific CloudTrail query.', {
             type: 'object',
             properties: {
-                account,
-                region,
+                region: { 
+                    type: 'string', 
+                    description: 'The AWS region to use. This is probably ca-central-1 (default), unless otherwise specified.', 
+                    default: 'ca-central-1' 
+                },
                 QueryId: {
                     type: 'string',
                     description: 'The ID of the query to retrieve results for.'
@@ -632,21 +514,14 @@ export class GetCloudTrailQueryResults extends CloudTrailTool {
                     description: 'A token to retrieve the next page of results.'
                 },
             },
-            required: ['account', 'region', 'QueryId']
+            required: ['region', 'QueryId']
         });
     }
 
     async call(id, args, context, streamManager, user) {
         try {
-            const { account, region, QueryId, EventDataStore, EventDataStoreOwnerAccountId, MaxResults, NextToken } = args;
+            const { region, QueryId, EventDataStore, EventDataStoreOwnerAccountId, MaxResults, NextToken } = args;
             
-            // Emit initial progress
-            user.emit('tool.output.chunk', {
-                object: 'tool.output.chunk',
-                toolCallId: id,
-                data: `Retrieving query results for QueryId: ${QueryId} in account ${account} and region ${region}...`
-            });
-
             const input = {
                 QueryId
             };
@@ -656,24 +531,12 @@ export class GetCloudTrailQueryResults extends CloudTrailTool {
             if (NextToken) input.NextToken = NextToken;
 
             const command = new GetQueryResultsCommand(input);
-            const response = await this.executeWithCommand({ command, account, region });
-
-            // Emit response data
-            user.emit('tool.output.chunk', {
-                object: 'tool.output.chunk',
-                toolCallId: id,
-                data: JSON.stringify(response, null, 2)
-            });
+            const response = await this.executeWithCommand({ command, region });
 
             return response;
 
         } catch (error) {
             logger.error(`Error retrieving query results: ${error.message}`);
-            user.emit('tool.error', {
-                object: 'tool.error',
-                toolCallId: id,
-                data: error.message
-            });
             throw error;
         }
     }
@@ -684,8 +547,11 @@ export class ListCloudTrailQueries extends CloudTrailTool {
         super('ListCloudTrailQueries', 'Returns a list of queries and query statuses for the past seven days.', {
             type: 'object',
             properties: {
-                account,
-                region,
+                region: { 
+                    type: 'string', 
+                    description: 'The AWS region to use. This is probably ca-central-1 (default), unless otherwise specified.', 
+                    default: 'ca-central-1' 
+                },
                 EventDataStore: {
                     type: 'string',
                     description: 'The name or ARN of the event data store.'
@@ -703,21 +569,14 @@ export class ListCloudTrailQueries extends CloudTrailTool {
                     description: 'A token to retrieve the next page of results.'
                 },
             },
-            required: ['account', 'region']
+            required: ['region']
         });
     }
 
     async call(id, args, context, streamManager, user) {
         try {
-            const { account, region, EventDataStore, EventDataStoreOwnerAccountId, MaxResults, NextToken } = args;
+            const { region, EventDataStore, EventDataStoreOwnerAccountId, MaxResults, NextToken } = args;
             
-            // Emit initial progress
-            user.emit('tool.output.chunk', {
-                object: 'tool.output.chunk',
-                toolCallId: id,
-                data: `Listing queries for event data store ${EventDataStore} in account ${account} and region ${region}...`
-            });
-
             const input = {};
             if (EventDataStore) input.EventDataStore = EventDataStore;
             if (EventDataStoreOwnerAccountId) input.EventDataStoreOwnerAccountId = EventDataStoreOwnerAccountId;
@@ -725,24 +584,12 @@ export class ListCloudTrailQueries extends CloudTrailTool {
             if (NextToken) input.NextToken = NextToken;
 
             const command = new ListQueriesCommand(input);
-            const response = await this.executeWithCommand({ command, account, region });
-
-            // Emit response data
-            user.emit('tool.output.chunk', {
-                object: 'tool.output.chunk',
-                toolCallId: id,
-                data: JSON.stringify(response, null, 2)
-            });
+            const response = await this.executeWithCommand({ command, region });
 
             return response;
 
         } catch (error) {
             logger.error(`Error listing queries: ${error.message}`);
-            user.emit('tool.error', {
-                object: 'tool.error',
-                toolCallId: id,
-                data: error.message
-            });
             throw error;
         }
     }
@@ -753,28 +600,24 @@ export class GetEventDataStore extends CloudTrailTool {
         super('GetEventDataStore', 'Returns information about a specific CloudTrail event data store.', {
             type: 'object',
             properties: {
-                account,
-                region,
+                region: { 
+                    type: 'string', 
+                    description: 'The AWS region to use. This is probably ca-central-1 (default), unless otherwise specified.', 
+                    default: 'ca-central-1' 
+                },
                 EventDataStore: {
                     type: 'string',
                     description: 'The ARN or ID suffix of the event data store to retrieve information for.'
                 },
             },
-            required: ['account', 'region', 'EventDataStore']
+            required: ['region', 'EventDataStore']
         });
     }
 
     async call(id, args, context, streamManager, user) {
         try {
-            const { account, region, EventDataStore } = args;
+            const { region, EventDataStore } = args;
             
-            // Emit initial progress
-            user.emit('tool.output.chunk', {
-                object: 'tool.output.chunk',
-                toolCallId: id,
-                data: `Retrieving event data store ${EventDataStore} in account ${account} and region ${region}...`
-            });
-
             // Validate input: EventDataStore is required
             if (!EventDataStore) {
                 throw new Error('EventDataStore must be specified.');
@@ -783,24 +626,12 @@ export class GetEventDataStore extends CloudTrailTool {
             const input = { EventDataStore };
 
             const command = new GetEventDataStoreCommand(input);
-            const response = await this.executeWithCommand({ command, account, region });
-
-            // Emit response data
-            user.emit('tool.output.chunk', {
-                object: 'tool.output.chunk',
-                toolCallId: id,
-                data: JSON.stringify(response, null, 2)
-            });
+            const response = await this.executeWithCommand({ command, region });
 
             return response;
 
         } catch (error) {
             logger.error(`Error retrieving event data store: ${error.message}`);
-            user.emit('tool.error', {
-                object: 'tool.error',
-                toolCallId: id,
-                data: error.message
-            });
             throw error;
         }
     }
@@ -811,28 +642,24 @@ export class GetChannel extends CloudTrailTool {
         super('GetChannel', 'Returns information about a specific CloudTrail channel.', {
             type: 'object',
             properties: {
-                account,
-                region,
+                region: { 
+                    type: 'string', 
+                    description: 'The AWS region to use. This is probably ca-central-1 (default), unless otherwise specified.', 
+                    default: 'ca-central-1' 
+                },
                 Channel: {
                     type: 'string',
                     description: 'The ARN or UUID of a channel.'
                 },
             },
-            required: ['account', 'region', 'Channel']
+            required: ['region', 'Channel']
         });
     }
 
     async call(id, args, context, streamManager, user) {
         try {
-            const { account, region, Channel } = args;
+            const { region, Channel } = args;
             
-            // Emit initial progress
-            user.emit('tool.output.chunk', {
-                object: 'tool.output.chunk',
-                toolCallId: id,
-                data: `Getting channel ${Channel} in account ${account} and region ${region}...`
-            });
-
             // Validate input: Channel is required
             if (!Channel) {
                 throw new Error('Channel must be specified.');
@@ -841,24 +668,12 @@ export class GetChannel extends CloudTrailTool {
             const input = { Channel };
 
             const command = new GetChannelCommand(input);
-            const response = await this.executeWithCommand({ command, account, region });
-
-            // Emit response data
-            user.emit('tool.output.chunk', {
-                object: 'tool.output.chunk',
-                toolCallId: id,
-                data: JSON.stringify(response, null, 2)
-            });
+            const response = await this.executeWithCommand({ command, region });
 
             return response;
 
         } catch (error) {
             logger.error(`Error getting channel: ${error.message}`);
-            user.emit('tool.error', {
-                object: 'tool.error',
-                toolCallId: id,
-                data: error.message
-            });
             throw error;
         }
     }
@@ -869,8 +684,11 @@ export class DescribeQuery extends CloudTrailTool {
         super('DescribeQuery', 'Returns metadata about a CloudTrail Lake query, including runtime, events scanned/matched, status, and delivery information if results are stored in S3.', {
             type: 'object',
             properties: {
-                account,
-                region,
+                region: { 
+                    type: 'string', 
+                    description: 'The AWS region to use. This is probably ca-central-1 (default), unless otherwise specified.', 
+                    default: 'ca-central-1' 
+                },
                 QueryId: {
                     type: 'string',
                     description: 'The ID of the query to describe.'
@@ -892,21 +710,14 @@ export class DescribeQuery extends CloudTrailTool {
                     description: 'The AWS account ID of the event data store owner.'
                 },
             },
-            required: ['account', 'region']
+            required: ['region']
         });
     }
 
     async call(id, args, context, streamManager, user) {
         try {
-            const { account, region, QueryId, QueryAlias, RefreshId, EventDataStore, EventDataStoreOwnerAccountId } = args;
+            const { region, QueryId, QueryAlias, RefreshId, EventDataStore, EventDataStoreOwnerAccountId } = args;
             
-            // Emit initial progress
-            user.emit('tool.output.chunk', {
-                object: 'tool.output.chunk',
-                toolCallId: id,
-                data: `Describing query ${QueryId || QueryAlias} in account ${account} and region ${region}...`
-            });
-
             // Validate input: either QueryId or QueryAlias must be provided
             if (!QueryId && !QueryAlias) {
                 throw new Error('Either QueryId or QueryAlias must be specified.');
@@ -920,24 +731,12 @@ export class DescribeQuery extends CloudTrailTool {
             if (EventDataStoreOwnerAccountId) input.EventDataStoreOwnerAccountId = EventDataStoreOwnerAccountId;
 
             const command = new DescribeQueryCommand(input);
-            const response = await this.executeWithCommand({ command, account, region });
-
-            // Emit response data
-            user.emit('tool.output.chunk', {
-                object: 'tool.output.chunk',
-                toolCallId: id,
-                data: JSON.stringify(response, null, 2)
-            });
+            const response = await this.executeWithCommand({ command, region });
 
             return response;
 
         } catch (error) {
             logger.error(`Error describing query: ${error.message}`);
-            user.emit('tool.error', {
-                object: 'tool.error',
-                toolCallId: id,
-                data: error.message
-            });
             throw error;
         }
     }
@@ -948,8 +747,11 @@ export class DescribeCloudTrailTrails extends CloudTrailTool {
         super('DescribeCloudTrailTrails', 'Retrieves settings for one or more CloudTrail trails associated with the current Region for your account.', {
             type: 'object',
             properties: {
-                account,
-                region,
+                region: { 
+                    type: 'string', 
+                    description: 'The AWS region to use. This is probably ca-central-1 (default), unless otherwise specified.', 
+                    default: 'ca-central-1' 
+                },
                 trailNameList: {
                     type: 'array',
                     items: {
@@ -963,21 +765,14 @@ export class DescribeCloudTrailTrails extends CloudTrailTool {
                     default: true
                 },
             },
-            required: ['account', 'region']
+            required: ['region']
         });
     }
 
     async call(id, args, context, streamManager, user) {
         try {
-            const { account, region, trailNameList, includeShadowTrails } = args;
+            const { region, trailNameList, includeShadowTrails } = args;
             
-            // Emit initial progress
-            user.emit('tool.output.chunk', {
-                object: 'tool.output.chunk',
-                toolCallId: id,
-                data: `Describing trails in account ${account} and region ${region}...`
-            });
-
             const input = {};
             if (trailNameList && trailNameList.length > 0) {
                 input.trailNameList = trailNameList;
@@ -987,24 +782,12 @@ export class DescribeCloudTrailTrails extends CloudTrailTool {
             }
 
             const command = new DescribeTrailsCommand(input);
-            const response = await this.executeWithCommand({ command, account, region });
-
-            // Emit response data
-            user.emit('tool.output.chunk', {
-                object: 'tool.output.chunk',
-                toolCallId: id,
-                data: JSON.stringify(response, null, 2)
-            });
+            const response = await this.executeWithCommand({ command, region });
 
             return response;
 
         } catch (error) {
             logger.error(`Error describing trails: ${error.message}`);
-            user.emit('tool.error', {
-                object: 'tool.error',
-                toolCallId: id,
-                data: error.message
-            });
             throw error;
         }
     }
@@ -1015,8 +798,11 @@ export class GenerateQuery extends CloudTrailTool {
         super('GenerateQuery', 'Generates a SQL query from a natural language prompt using generative AI, tailored for querying event data in CloudTrail Lake.', {
             type: 'object',
             properties: {
-                account,
-                region,
+                region: { 
+                    type: 'string', 
+                    description: 'The AWS region to use. This is probably ca-central-1 (default), unless otherwise specified.', 
+                    default: 'ca-central-1' 
+                },
                 EventDataStores: {
                     type: 'array',
                     items: {
@@ -1030,21 +816,14 @@ export class GenerateQuery extends CloudTrailTool {
                     description: 'The natural language prompt in English to generate the SQL query.',
                 },
             },
-            required: ['account', 'region', 'EventDataStores', 'Prompt']
+            required: ['region', 'EventDataStores', 'Prompt']
         });
     }
 
     async call(id, args, context, streamManager, user) {
         try {
-            const { account, region, EventDataStores, Prompt } = args;
+            const { region, EventDataStores, Prompt } = args;
             
-            // Emit initial progress
-            user.emit('tool.output.chunk', {
-                object: 'tool.output.chunk',
-                toolCallId: id,
-                data: `Generating query from prompt in account ${account} and region ${region}...`
-            });
-
             // Validate input: EventDataStores and Prompt are required
             if (!EventDataStores || EventDataStores.length === 0) {
                 throw new Error('EventDataStores must be a non-empty array.');
@@ -1059,24 +838,12 @@ export class GenerateQuery extends CloudTrailTool {
             };
 
             const command = new GenerateQueryCommand(input);
-            const response = await this.executeWithCommand({ command, account, region });
-
-            // Emit response data
-            user.emit('tool.output.chunk', {
-                object: 'tool.output.chunk',
-                toolCallId: id,
-                data: JSON.stringify(response, null, 2)
-            });
+            const response = await this.executeWithCommand({ command, region });
 
             return response;
 
         } catch (error) {
             logger.error(`Error generating query: ${error.message}`);
-            user.emit('tool.error', {
-                object: 'tool.error',
-                toolCallId: id,
-                data: error.message
-            });
             throw error;
         }
     }

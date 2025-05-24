@@ -1,6 +1,6 @@
-import Tool from '../../models/Tool.js';
+import Tool from '../models/Tool.js';
 import dotenv from 'dotenv';
-import logger from '../../logger.js';
+import logger from '../logger.js';
 
 dotenv.config();
 
@@ -18,16 +18,14 @@ import {
   DescribeCapacityProvidersCommand,
 } from "@aws-sdk/client-ecs";
 
-import { accountCredentials, defaultRegion } from '../config/awsConfig.js';
-
 // Simplified ECSTool base class
 class ECSTool extends Tool {
   constructor(name, description, parameters) {
     super(name, description, parameters);
   }
 
-  async executeWithCommand({ command, account, region }) {
-    const ecsClient = this.getEcsClient(account, region);
+  async executeWithCommand({ command, region }) {
+    const ecsClient = this.getEcsClient(region);
     try {
       const response = await ecsClient.send(command);
       return response;
@@ -37,28 +35,14 @@ class ECSTool extends Tool {
     }
   }
 
-  getEcsClient(account, region) {
-    const validAccounts = Object.keys(accountCredentials);
-    if (!validAccounts.includes(account)) {
-      throw new Error(`Invalid account. Must be one of: ${validAccounts.join(', ')}`);
-    }
-
-    const credentials = accountCredentials[account];
-    if (!credentials) {
-      throw new Error(`No credentials found for account: ${account}`);
-    }
-
+  getEcsClient(region) {
     return new ECSClient({
-      region: region || defaultRegion,
-      credentials,
+      region: region || process.env.AWS_DEFAULT_REGION,
       maxAttempts: 3,
       requestTimeout: 5000
     });
   }
 }
-
-const account = { type: 'string', description: 'The AWS account to list clusters in. One of "caredove-dev" or "caredove-prod".', default: 'caredove-dev' };
-const region = { type: 'string', description: 'The AWS region to list clusters in. This is probably ca-central-1 (default), unless otherwise specified.', default: 'ca-central-1' };
 
 /**
  * Lists all ECS clusters in the account.
@@ -68,8 +52,7 @@ export class ListClusters extends ECSTool {
     super('ListClusters', 'Lists all ECS clusters in the account.', {
       type: 'object',
       properties: {
-        account,
-        region,
+        region: { type: 'string', description: 'The AWS region to list clusters in. This is probably ca-central-1 (default), unless otherwise specified.', default: 'ca-central-1' },
         maxResults: {
           type: 'number',
           description: 'Maximum number of clusters to return (optional).'
@@ -79,21 +62,14 @@ export class ListClusters extends ECSTool {
           description: 'Token for the next page of results (optional).'
         }
       },
-      required: ['account', 'region']
+      required: ['region']
     });
   }
 
   async call(id, args, context, streamManager, user) {
     try {
-      const { account, region, maxResults, nextToken } = args;
+      const { region, maxResults, nextToken } = args;
       
-      // Emit initial progress
-      user.emit('tool.output.chunk', {
-        object: 'tool.output.chunk',
-        toolCallId: id,
-        data: `Listing ECS clusters in ${account}/${region}...`
-      });
-
       let allClusters = [];
       let currentToken = nextToken;
 
@@ -103,16 +79,9 @@ export class ListClusters extends ECSTool {
           nextToken: currentToken
         });
 
-        const response = await this.executeWithCommand({ command, account, region });
+        const response = await this.executeWithCommand({ command, region });
         allClusters = allClusters.concat(response.clusterArns || []);
         currentToken = response.nextToken;
-
-        // Emit progress
-        user.emit('tool.output.chunk', {
-          object: 'tool.output.chunk',
-          toolCallId: id,
-          data: `Found ${allClusters.length} clusters so far...`
-        });
 
       } while (currentToken);
 
@@ -123,11 +92,6 @@ export class ListClusters extends ECSTool {
 
     } catch (error) {
       logger.error(`Error listing ECS clusters: ${error.message}`);
-      user.emit('tool.error', {
-        object: 'tool.error',
-        toolCallId: id,
-        data: error.message
-      });
       throw error;
     }
   }
@@ -141,31 +105,23 @@ export class DescribeClusters extends ECSTool {
     super('DescribeClusters', 'Retrieves detailed information about ECS clusters by ARN', {
       type: 'object',
       properties: {
-        account,
-        region,
+        region: { type: 'string', description: 'The AWS region to list clusters in. This is probably ca-central-1 (default), unless otherwise specified.', default: 'ca-central-1' },
         clusters: {
           type: 'array',
           items: { type: 'string' },
           description: 'List of cluster names or ARNs to describe.'
         }
       },
-      required: ['clusters', 'account', 'region']
+      required: ['clusters', 'region']
     });
   }
 
   async call(id, args, context, streamManager, user) {
     try {
-      const { account, region, clusters } = args;
+      const { region, clusters } = args;
       
-      // Emit initial progress
-      user.emit('tool.output.chunk', {
-        object: 'tool.output.chunk',
-        toolCallId: id,
-        data: `Describing ECS clusters in ${account}/${region}...`
-      });
-
       const command = new DescribeClustersCommand({ clusters });
-      const response = await this.executeWithCommand({ command, account, region });
+      const response = await this.executeWithCommand({ command, region });
 
       return {
         clusters: response.clusters,
@@ -174,11 +130,6 @@ export class DescribeClusters extends ECSTool {
 
     } catch (error) {
       logger.error(`Error describing clusters: ${error.message}`);
-      user.emit('tool.error', {
-        object: 'tool.error',
-        toolCallId: id,
-        data: error.message
-      });
       throw error;
     }
   }
@@ -192,8 +143,7 @@ export class ListServices extends ECSTool {
     super('ListServices', 'Lists services in an ECS cluster', {
       type: 'object',
       properties: {
-        account,
-        region,
+        region: { type: 'string', description: 'The AWS region to list clusters in. This is probably ca-central-1 (default), unless otherwise specified.', default: 'ca-central-1' },
         cluster: {
           type: 'string',
           description: 'The ECS cluster name or ARN'
@@ -207,21 +157,14 @@ export class ListServices extends ECSTool {
           description: 'Token for the next page of results (optional)'
         }
       },
-      required: ['account', 'region', 'cluster']
+      required: ['region', 'cluster']
     });
   }
 
   async call(id, args, context, streamManager, user) {
     try {
-      const { account, region, cluster, maxResults, nextToken } = args;
+      const { region, cluster, maxResults, nextToken } = args;
       
-      // Emit initial progress
-      user.emit('tool.output.chunk', {
-        object: 'tool.output.chunk',
-        toolCallId: id,
-        data: `Listing ECS services in cluster ${cluster}...`
-      });
-
       let allServices = [];
       let currentToken = nextToken;
 
@@ -232,16 +175,9 @@ export class ListServices extends ECSTool {
           nextToken: currentToken
         });
 
-        const response = await this.executeWithCommand({ command, account, region });
+        const response = await this.executeWithCommand({ command, region });
         allServices = allServices.concat(response.serviceArns || []);
         currentToken = response.nextToken;
-
-        // Emit progress
-        user.emit('tool.output.chunk', {
-          object: 'tool.output.chunk',
-          toolCallId: id,
-          data: `Found ${allServices.length} services so far...`
-        });
 
       } while (currentToken);
 
@@ -252,11 +188,6 @@ export class ListServices extends ECSTool {
 
     } catch (error) {
       logger.error(`Error listing ECS services: ${error.message}`);
-      user.emit('tool.error', {
-        object: 'tool.error',
-        toolCallId: id,
-        data: error.message
-      });
       throw error;
     }
   }
@@ -270,38 +201,25 @@ export class DescribeServices extends ECSTool {
     super('DescribeServices', 'Returns detailed information about specified ECS services', {
       type: 'object',
       properties: {
-        account,
-        region,
+        region: { type: 'string', description: 'The AWS region to list clusters in. This is probably ca-central-1 (default), unless otherwise specified.', default: 'ca-central-1' },
         cluster: { type: 'string', description: 'The cluster name or ARN.' },
         services: { type: 'array', items: { type: 'string' }, description: 'List of service names or ARNs to describe.' }
       },
-      required: ['cluster', 'services', 'account', 'region']
+      required: ['cluster', 'services', 'region']
     });
   }
 
   async call(id, args, context, streamManager, user) {
     try {
-      const { account, region, cluster, services } = args;
+      const { region, cluster, services } = args;
       
-      // Emit initial progress
-      user.emit('tool.output.chunk', {
-        object: 'tool.output.chunk',
-        toolCallId: id,
-        data: `Describing ECS services in cluster ${cluster}...`
-      });
-
       const command = new DescribeServicesCommand({ cluster, services, include: ['TAGS'] });
-      const response = await this.executeWithCommand({ command, account, region });
+      const response = await this.executeWithCommand({ command, region });
       
       return response;
 
     } catch (error) {
       logger.error(`Error describing services: ${error.message}`);
-      user.emit('tool.error', {
-        object: 'tool.error',
-        toolCallId: id,
-        data: error.message
-      });
       throw error;
     }
   }
@@ -315,39 +233,26 @@ export class ListTasks extends ECSTool {
     super('ListTasks', 'Lists tasks running or stopped in a cluster', {
       type: 'object',
       properties: {
-        account,
-        region,
+        region: { type: 'string', description: 'The AWS region to list clusters in. This is probably ca-central-1 (default), unless otherwise specified.', default: 'ca-central-1' },
         cluster: { type: 'string', description: 'The cluster name or ARN' },
         serviceName: { type: 'string', description: 'The service name to filter tasks' },
         desiredStatus: { type: 'string', description: 'Filter by task status (RUNNING, STOPPED)' }
       },
-      required: ['cluster', 'account', 'region']
+      required: ['cluster', 'region']
     });
   }
 
   async call(id, args, context, streamManager, user) {
     try {
-      const { account, region, cluster, serviceName, desiredStatus } = args;
+      const { region, cluster, serviceName, desiredStatus } = args;
       
-      // Emit initial progress
-      user.emit('tool.output.chunk', {
-        object: 'tool.output.chunk',
-        toolCallId: id,
-        data: `Listing ECS tasks in cluster ${cluster}...`
-      });
-
       const command = new ListTasksCommand({ cluster, serviceName, desiredStatus });
-      const response = await this.executeWithCommand({ command, account, region });
+      const response = await this.executeWithCommand({ command, region });
       
       return response;
 
     } catch (error) {
       logger.error(`Error listing tasks: ${error.message}`);
-      user.emit('tool.error', {
-        object: 'tool.error',
-        toolCallId: id,
-        data: error.message
-      });
       throw error;
     }
   }
@@ -361,38 +266,25 @@ export class DescribeTasks extends ECSTool {
     super('DescribeTasks', 'Retrieves detailed information about specified tasks', {
       type: 'object',
       properties: {
-        account,
-        region,
+        region: { type: 'string', description: 'The AWS region to list clusters in. This is probably ca-central-1 (default), unless otherwise specified.', default: 'ca-central-1' },
         cluster: { type: 'string', description: 'The cluster name or ARN' },
         tasks: { type: 'array', items: { type: 'string' }, description: 'List of task IDs or ARNs to describe' }
       },
-      required: ['cluster', 'tasks', 'account', 'region']
+      required: ['cluster', 'tasks', 'region']
     });
   }
 
   async call(id, args, context, streamManager, user) {
     try {
-      const { account, region, cluster, tasks } = args;
+      const { region, cluster, tasks } = args;
       
-      // Emit initial progress
-      user.emit('tool.output.chunk', {
-        object: 'tool.output.chunk',
-        toolCallId: id,
-        data: `Describing ECS tasks in cluster ${cluster}...`
-      });
-
       const command = new DescribeTasksCommand({ cluster, tasks });
-      const response = await this.executeWithCommand({ command, account, region });
+      const response = await this.executeWithCommand({ command, region });
       
       return response;
 
     } catch (error) {
       logger.error(`Error describing tasks: ${error.message}`);
-      user.emit('tool.error', {
-        object: 'tool.error',
-        toolCallId: id,
-        data: error.message
-      });
       throw error;
     }
   }
@@ -406,37 +298,24 @@ export class DescribeTaskDefinition extends ECSTool {
     super('DescribeTaskDefinition', 'Provides details on a task definition', {
       type: 'object',
       properties: {
-        account,
-        region,
+        region: { type: 'string', description: 'The AWS region to list clusters in. This is probably ca-central-1 (default), unless otherwise specified.', default: 'ca-central-1' },
         taskDefinition: { type: 'string', description: 'The task definition name or ARN' }
       },
-      required: ['taskDefinition', 'account', 'region']
+      required: ['taskDefinition', 'region']
     });
   }
 
   async call(id, args, context, streamManager, user) {
     try {
-      const { account, region, taskDefinition } = args;
+      const { region, taskDefinition } = args;
       
-      // Emit initial progress
-      user.emit('tool.output.chunk', {
-        object: 'tool.output.chunk',
-        toolCallId: id,
-        data: `Describing ECS task definition ${taskDefinition} in ${account}/${region}...`
-      });
-
       const command = new DescribeTaskDefinitionCommand({ taskDefinition });
-      const response = await this.executeWithCommand({ command, account, region });
+      const response = await this.executeWithCommand({ command, region });
       
       return response;
 
     } catch (error) {
       logger.error(`Error describing task definition: ${error.message}`);
-      user.emit('tool.error', {
-        object: 'tool.error',
-        toolCallId: id,
-        data: error.message
-      });
       throw error;
     }
   }
@@ -450,38 +329,25 @@ export class DescribeContainerInstances extends ECSTool {
     super('DescribeContainerInstances', 'Describes container instances within a cluster', {
       type: 'object',
       properties: {
-        account,
-        region,
+        region: { type: 'string', description: 'The AWS region to list clusters in. This is probably ca-central-1 (default), unless otherwise specified.', default: 'ca-central-1' },
         cluster: { type: 'string', description: 'The cluster name or ARN' },
         containerInstances: { type: 'array', items: { type: 'string' }, description: 'List of container instance IDs or ARNs' }
       },
-      required: ['cluster', 'containerInstances', 'account', 'region']
+      required: ['cluster', 'containerInstances', 'region']
     });
   }
 
   async call(id, args, context, streamManager, user) {
     try {
-      const { account, region, cluster, containerInstances } = args;
+      const { region, cluster, containerInstances } = args;
       
-      // Emit initial progress
-      user.emit('tool.output.chunk', {
-        object: 'tool.output.chunk',
-        toolCallId: id,
-        data: `Describing ECS container instances in cluster ${cluster}...`
-      });
-
       const command = new DescribeContainerInstancesCommand({ cluster, containerInstances });
-      const response = await this.executeWithCommand({ command, account, region });
+      const response = await this.executeWithCommand({ command, region });
       
       return response;
 
     } catch (error) {
       logger.error(`Error describing container instances: ${error.message}`);
-      user.emit('tool.error', {
-        object: 'tool.error',
-        toolCallId: id,
-        data: error.message
-      });
       throw error;
     }
   }
@@ -495,37 +361,24 @@ export class ListTagsForEcsResource extends ECSTool {
     super('ListTagsForEcsResource', 'Lists tags for a specified ECS resource', {
       type: 'object',
       properties: {
-        account,
-        region,
+        region: { type: 'string', description: 'The AWS region to list clusters in. This is probably ca-central-1 (default), unless otherwise specified.', default: 'ca-central-1' },
         resourceArn: { type: 'string', description: 'The ARN of the resource to list tags for' }
       },
-      required: ['resourceArn', 'account', 'region']
+      required: ['resourceArn', 'region']
     });
   }
 
   async call(id, args, context, streamManager, user) {
     try {
-      const { account, region, resourceArn } = args;
+      const { region, resourceArn } = args;
       
-      // Emit initial progress
-      user.emit('tool.output.chunk', {
-        object: 'tool.output.chunk',
-        toolCallId: id,
-        data: `Listing ECS tags for resource ${resourceArn}...`
-      });
-
       const command = new ListTagsForResourceCommand({ resourceArn });
-      const response = await this.executeWithCommand({ command, account, region });
+      const response = await this.executeWithCommand({ command, region });
       
       return response;
 
     } catch (error) {
       logger.error(`Error listing resource tags: ${error.message}`);
-      user.emit('tool.error', {
-        object: 'tool.error',
-        toolCallId: id,
-        data: error.message
-      });
       throw error;
     }
   }
@@ -539,37 +392,24 @@ export class DescribeCapacityProviders extends ECSTool {
     super('DescribeCapacityProviders', 'Provides details about capacity providers linked to clusters', {
       type: 'object',
       properties: {
-        account,
-        region,
+        region: { type: 'string', description: 'The AWS region to list clusters in. This is probably ca-central-1 (default), unless otherwise specified.', default: 'ca-central-1' },
         capacityProviders: { type: 'array', items: { type: 'string' }, description: 'Names of the capacity providers to describe' }
       },
-      required: ['capacityProviders', 'account', 'region']
+      required: ['capacityProviders', 'region']
     });
   }
 
   async call(id, args, context, streamManager, user) {
     try {
-      const { account, region, capacityProviders } = args;
+      const { region, capacityProviders } = args;
       
-      // Emit initial progress
-      user.emit('tool.output.chunk', {
-        object: 'tool.output.chunk',
-        toolCallId: id,
-        data: `Describing ECS capacity providers in ${account}/${region}...`
-      });
-
       const command = new DescribeCapacityProvidersCommand({ capacityProviders });
-      const response = await this.executeWithCommand({ command, account, region });
+      const response = await this.executeWithCommand({ command, region });
       
       return response;
 
     } catch (error) {
       logger.error(`Error describing capacity providers: ${error.message}`);
-      user.emit('tool.error', {
-        object: 'tool.error',
-        toolCallId: id,
-        data: error.message
-      });
       throw error;
     }
   }

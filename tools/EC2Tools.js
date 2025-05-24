@@ -1,6 +1,6 @@
-import Tool from '../../models/Tool.js';
+import Tool from '../models/Tool.js';
 import dotenv from 'dotenv';
-import logger from '../../logger.js';
+import logger from '../logger.js';
 
 dotenv.config();
 
@@ -24,22 +24,9 @@ import {
     DescribeAddressesCommand,
 } from "@aws-sdk/client-ec2";
 
-import { accountCredentials, defaultRegion } from '../config/awsConfig.js';
-
-const getEc2Client = (account, region) => {
-    const validAccounts = Object.keys(accountCredentials);
-    if (!validAccounts.includes(account)) {
-        throw new Error(`Invalid account. Must be one of: ${validAccounts.join(', ')}`);
-    }
-
-    const credentials = accountCredentials[account];
-    if (!credentials) {
-        throw new Error(`No credentials found for account: ${account}`);
-    }
-
+const getEc2Client = (region) => {
     return new EC2Client({
-        region: region || defaultRegion,
-        credentials,
+        region: region || process.env.AWS_DEFAULT_REGION,
         maxAttempts: 3,
         requestTimeout: 5000
     });
@@ -50,8 +37,8 @@ class EC2Tool extends Tool {
         super(name, description, parameters);
     }
 
-    async executeWithCommand({ command, account, region }) {
-        const ec2Client = getEc2Client(account, region);
+    async executeWithCommand({ command, region }) {
+        const ec2Client = getEc2Client(region);
         try {
             const response = await ec2Client.send(command);
             return response;
@@ -62,42 +49,31 @@ class EC2Tool extends Tool {
     }
 }
 
-const account = { type: 'string', description: 'The AWS account to use. One of "caredove-dev" or "caredove-prod".', default: 'caredove-dev' };
-const region = { type: 'string', description: 'The AWS region to use. This is probably ca-central-1 (default), unless otherwise specified.', default: 'ca-central-1' };
-
 export class DescribeSecurityGroups extends EC2Tool {
     constructor() {
-        super('DescribeSecurityGroups', 'Describes EC2 security groups in the specified account and region', {
+        super('DescribeSecurityGroups', 'Describes EC2 security groups in the specified region', {
             type: 'object',
             properties: {
-                account,
-                region,
+                region: { type: 'string', description: 'The AWS region to use. This is probably ca-central-1 (default), unless otherwise specified.', default: 'ca-central-1' },
                 groupIds: {
                     type: 'array',
                     items: { type: 'string' },
                     description: 'List of security group IDs to describe (optional)'
                 }
             },
-            required: ['account', 'region']
+            required: ['region']
         });
     }
 
     async call(id, args, context, streamManager, user) {
         try {
-            const { account, region, groupIds } = args;
-            
-            // Emit initial progress
-            user.emit('tool.output.chunk', {
-                object: 'tool.output.chunk',
-                toolCallId: id,
-                data: `Describing security groups in ${account}/${region}...`
-            });
+            const { region, groupIds } = args;
 
             const command = new DescribeSecurityGroupsCommand({
                 GroupIds: groupIds
             });
 
-            const response = await this.executeWithCommand({ command, account, region });
+            const response = await this.executeWithCommand({ command, region });
             
             return {
                 securityGroups: response.SecurityGroups || []
@@ -105,11 +81,6 @@ export class DescribeSecurityGroups extends EC2Tool {
 
         } catch (error) {
             logger.error(`Error describing security groups: ${error.message}`);
-            user.emit('tool.error', {
-                object: 'tool.error',
-                toolCallId: id,
-                data: error.message
-            });
             throw error;
         }
     }
@@ -120,41 +91,28 @@ export class DescribeSubnets extends EC2Tool {
         super('DescribeSubnets', 'Describes one or more subnets', {
             type: 'object',
             properties: {
-                account,
-                region,
+                region: { type: 'string', description: 'The AWS region to use. This is probably ca-central-1 (default), unless otherwise specified.', default: 'ca-central-1' },
                 subnetIds: {
                     type: 'array',
                     items: { type: 'string' },
                     description: 'List of subnet IDs to describe'
                 }
             },
-            required: ['subnetIds', 'account', 'region']
+            required: ['subnetIds', 'region']
         });
     }
 
     async call(id, args, context, streamManager, user) {
         try {
-            const { account, region, subnetIds } = args;
+            const { region, subnetIds } = args;
             
-            // Emit initial progress
-            user.emit('tool.output.chunk', {
-                object: 'tool.output.chunk',
-                toolCallId: id,
-                data: `Describing subnets in ${account}/${region}...`
-            });
-
             const command = new DescribeSubnetsCommand({ SubnetIds: subnetIds });
-            const response = await this.executeWithCommand({ command, account, region });
+            const response = await this.executeWithCommand({ command, region });
             
             return response;
 
         } catch (error) {
             logger.error(`Error describing subnets: ${error.message}`);
-            user.emit('tool.error', {
-                object: 'tool.error',
-                toolCallId: id,
-                data: error.message
-            });
             throw error;
         }
     }
@@ -162,15 +120,9 @@ export class DescribeSubnets extends EC2Tool {
 
 export class DescribeInstances extends EC2Tool {
     constructor() {
-        super('DescribeInstances', 'Describes EC2 instances in the specified account and region', {
+        super('DescribeInstances', 'Describes EC2 instances in the specified region', {
             type: 'object',
             properties: {
-                account: {
-                    type: 'string',
-                    description: 'The AWS account to query',
-                    enum: ['caredove-dev', 'caredove-prod'],
-                    default: 'caredove-dev'
-                },
                 region: {
                     type: 'string',
                     description: 'The AWS region to query',
@@ -182,26 +134,19 @@ export class DescribeInstances extends EC2Tool {
                     description: 'List of instance IDs to describe (optional)'
                 }
             },
-            required: ['account', 'region']
+            required: ['region']
         });
     }
 
     async call(id, args, context, streamManager, user) {
         try {
-            const { account, region, instanceIds } = args;
-            
-            // Emit initial progress
-            user.emit('tool.output.chunk', {
-                object: 'tool.output.chunk',
-                toolCallId: id,
-                data: `Describing EC2 instances in ${account}/${region}...`
-            });
+            const { region, instanceIds } = args;
 
             const command = new DescribeInstancesCommand({
                 InstanceIds: instanceIds
             });
 
-            const response = await this.executeWithCommand({ command, account, region });
+            const response = await this.executeWithCommand({ command, region });
             
             return {
                 instances: response.Reservations?.flatMap(res => res.Instances) || []
@@ -209,11 +154,6 @@ export class DescribeInstances extends EC2Tool {
 
         } catch (error) {
             logger.error(`Error describing EC2 instances: ${error.message}`);
-            user.emit('tool.error', {
-                object: 'tool.error',
-                toolCallId: id,
-                data: error.message
-            });
             throw error;
         }
     }
@@ -224,8 +164,7 @@ export class DescribeVolumes extends EC2Tool {
         super('DescribeVolumes', 'Provides information about EBS volumes attached to your instances.', {
             type: 'object',
             properties: {
-                account,
-                region,
+                region: { type: 'string', description: 'The AWS region to use. This is probably ca-central-1 (default), unless otherwise specified.', default: 'ca-central-1' },
                 volumeIds: {
                     type: 'array',
                     items: { type: 'string' },
@@ -247,36 +186,24 @@ export class DescribeVolumes extends EC2Tool {
                     description: 'Filters to apply for the volumes (optional).'
                 }
             },
-            required: ['account', 'region']
+            required: ['region']
         });
     }
 
     async call(id, args, context, streamManager, user) {
         try {
-            const { account, region, volumeIds, filters } = args;
-            
-            // Emit initial progress
-            user.emit('tool.output.chunk', {
-                object: 'tool.output.chunk',
-                toolCallId: id,
-                data: `Describing EBS volumes in ${account}/${region}...`
-            });
+            const { region, volumeIds, filters } = args;
 
             const command = new DescribeVolumesCommand({ 
                 VolumeIds: volumeIds,
                 Filters: filters 
             });
-            const response = await this.executeWithCommand({ command, account, region });
+            const response = await this.executeWithCommand({ command, region });
             
             return response;
 
         } catch (error) {
             logger.error(`Error describing volumes: ${error.message}`);
-            user.emit('tool.error', {
-                object: 'tool.error',
-                toolCallId: id,
-                data: error.message
-            });
             throw error;
         }
     }
@@ -287,8 +214,7 @@ export class DescribeSnapshots extends EC2Tool {
         super('DescribeSnapshots', 'Retrieves details about EBS snapshots.', {
             type: 'object',
             properties: {
-                account,
-                region,
+                region: { type: 'string', description: 'The AWS region to use. This is probably ca-central-1 (default), unless otherwise specified.', default: 'ca-central-1' },
                 snapshotIds: {
                     type: 'array',
                     items: { type: 'string' },
@@ -311,36 +237,24 @@ export class DescribeSnapshots extends EC2Tool {
                     description: 'Filters to apply for the snapshots (optional).'
                 }
             },
-            required: ['account', 'region']
+            required: ['region']
         });
     }
 
     async call(id, args, context, streamManager, user) {
         try {
-            const { account, region, snapshotIds, filters } = args;
-            
-            // Emit initial progress
-            user.emit('tool.output.chunk', {
-                object: 'tool.output.chunk',
-                toolCallId: id,
-                data: `Describing EBS snapshots in ${account}/${region}...`
-            });
+            const { region, snapshotIds, filters } = args;
 
             const command = new DescribeSnapshotsCommand({ 
                 SnapshotIds: snapshotIds,
                 Filters: filters 
             });
-            const response = await this.executeWithCommand({ command, account, region });
+            const response = await this.executeWithCommand({ command, region });
             
             return response;
 
         } catch (error) {
             logger.error(`Error describing snapshots: ${error.message}`);
-            user.emit('tool.error', {
-                object: 'tool.error',
-                toolCallId: id,
-                data: error.message
-            });
             throw error;
         }
     }
@@ -351,8 +265,7 @@ export class DescribeVpcs extends EC2Tool {
         super('DescribeVpcs', 'Retrieves information about your Virtual Private Clouds (VPCs).', {
             type: 'object',
             properties: {
-                account,
-                region,
+                region: { type: 'string', description: 'The AWS region to use. This is probably ca-central-1 (default), unless otherwise specified.', default: 'ca-central-1' },
                 vpcIds: {
                     type: 'array',
                     items: { type: 'string' },
@@ -375,36 +288,24 @@ export class DescribeVpcs extends EC2Tool {
                     description: 'Filters to apply for the VPCs (optional).'
                 }
             },
-            required: ['account', 'region']
+            required: ['region']
         });
     }
 
     async call(id, args, context, streamManager, user) {
         try {
-            const { account, region, vpcIds, filters } = args;
-            
-            // Emit initial progress
-            user.emit('tool.output.chunk', {
-                object: 'tool.output.chunk',
-                toolCallId: id,
-                data: `Describing VPCs in ${account}/${region}...`
-            });
+            const { region, vpcIds, filters } = args;
 
             const command = new DescribeVpcsCommand({ 
                 VpcIds: vpcIds,
                 Filters: filters 
             });
-            const response = await this.executeWithCommand({ command, account, region });
+            const response = await this.executeWithCommand({ command, region });
             
             return response;
 
         } catch (error) {
             logger.error(`Error describing VPCs: ${error.message}`);
-            user.emit('tool.error', {
-                object: 'tool.error',
-                toolCallId: id,
-                data: error.message
-            });
             throw error;
         }
     }
@@ -415,8 +316,7 @@ export class DescribeNetworkInterfaces extends EC2Tool {
         super('DescribeNetworkInterfaces', 'Retrieves details about one or more network interfaces.', {
             type: 'object',
             properties: {
-                account,
-                region,
+                region: { type: 'string', description: 'The AWS region to use. This is probably ca-central-1 (default), unless otherwise specified.', default: 'ca-central-1' },
                 networkInterfaceIds: {
                     type: 'array',
                     items: { type: 'string' },
@@ -439,36 +339,24 @@ export class DescribeNetworkInterfaces extends EC2Tool {
                     description: 'Filters to apply for the network interfaces (optional).'
                 }
             },
-            required: ['account', 'region']
+            required: ['region']
         });
     }
 
     async call(id, args, context, streamManager, user) {
         try {
-            const { account, region, networkInterfaceIds, filters } = args;
-            
-            // Emit initial progress
-            user.emit('tool.output.chunk', {
-                object: 'tool.output.chunk',
-                toolCallId: id,
-                data: `Describing network interfaces in ${account}/${region}...`
-            });
+            const { region, networkInterfaceIds, filters } = args;
 
             const command = new DescribeNetworkInterfacesCommand({ 
                 NetworkInterfaceIds: networkInterfaceIds,
                 Filters: filters 
             });
-            const response = await this.executeWithCommand({ command, account, region });
+            const response = await this.executeWithCommand({ command, region });
             
             return response;
 
         } catch (error) {
             logger.error(`Error describing network interfaces: ${error.message}`);
-            user.emit('tool.error', {
-                object: 'tool.error',
-                toolCallId: id,
-                data: error.message
-            });
             throw error;
         }
     }
@@ -479,8 +367,7 @@ export class DescribeInternetGateways extends EC2Tool {
         super('DescribeInternetGateways', 'Provides information about your internet gateways.', {
             type: 'object',
             properties: {
-                account,
-                region,
+                region: { type: 'string', description: 'The AWS region to use. This is probably ca-central-1 (default), unless otherwise specified.', default: 'ca-central-1' },
                 internetGatewayIds: {
                     type: 'array',
                     items: { type: 'string' },
@@ -503,36 +390,24 @@ export class DescribeInternetGateways extends EC2Tool {
                     description: 'Filters to apply for the internet gateways (optional).'
                 }
             },
-            required: ['account', 'region']
+            required: ['region']
         });
     }
 
     async call(id, args, context, streamManager, user) {
         try {
-            const { account, region, internetGatewayIds, filters } = args;
-            
-            // Emit initial progress
-            user.emit('tool.output.chunk', {
-                object: 'tool.output.chunk',
-                toolCallId: id,
-                data: `Describing internet gateways in ${account}/${region}...`
-            });
+            const { region, internetGatewayIds, filters } = args;
 
             const command = new DescribeInternetGatewaysCommand({ 
                 InternetGatewayIds: internetGatewayIds,
                 Filters: filters 
             });
-            const response = await this.executeWithCommand({ command, account, region });
+            const response = await this.executeWithCommand({ command, region });
             
             return response;
 
         } catch (error) {
             logger.error(`Error describing internet gateways: ${error.message}`);
-            user.emit('tool.error', {
-                object: 'tool.error',
-                toolCallId: id,
-                data: error.message
-            });
             throw error;
         }
     }
@@ -543,8 +418,7 @@ export class DescribeNatGateways extends EC2Tool {
         super('DescribeNatGateways', 'Retrieves details about your NAT gateways.', {
             type: 'object',
             properties: {
-                account,
-                region,
+                region: { type: 'string', description: 'The AWS region to use. This is probably ca-central-1 (default), unless otherwise specified.', default: 'ca-central-1' },
                 natGatewayIds: {
                     type: 'array',
                     items: { type: 'string' },
@@ -567,36 +441,24 @@ export class DescribeNatGateways extends EC2Tool {
                     description: 'Filters to apply for the NAT gateways (optional).'
                 }
             },
-            required: ['account', 'region']
+            required: ['region']
         });
     }
 
     async call(id, args, context, streamManager, user) {
         try {
-            const { account, region, natGatewayIds, filters } = args;
-            
-            // Emit initial progress
-            user.emit('tool.output.chunk', {
-                object: 'tool.output.chunk',
-                toolCallId: id,
-                data: `Describing NAT gateways in ${account}/${region}...`
-            });
+            const { region, natGatewayIds, filters } = args;
 
             const command = new DescribeNatGatewaysCommand({ 
                 NatGatewayIds: natGatewayIds,
                 Filters: filters 
             });
-            const response = await this.executeWithCommand({ command, account, region });
+            const response = await this.executeWithCommand({ command, region });
             
             return response;
 
         } catch (error) {
             logger.error(`Error describing NAT gateways: ${error.message}`);
-            user.emit('tool.error', {
-                object: 'tool.error',
-                toolCallId: id,
-                data: error.message
-            });
             throw error;
         }
     }
@@ -607,8 +469,7 @@ export class DescribeRouteTables extends EC2Tool {
         super('DescribeRouteTables', 'Provides information about one or more route tables within your VPCs.', {
             type: 'object',
             properties: {
-                account,
-                region,
+                region: { type: 'string', description: 'The AWS region to use. This is probably ca-central-1 (default), unless otherwise specified.', default: 'ca-central-1' },
                 routeTableIds: {
                     type: 'array',
                     items: { type: 'string' },
@@ -631,36 +492,24 @@ export class DescribeRouteTables extends EC2Tool {
                     description: 'Filters to apply for the route tables (optional).'
                 }
             },
-            required: ['account', 'region']
+            required: ['region']
         });
     }
 
     async call(id, args, context, streamManager, user) {
         try {
-            const { account, region, routeTableIds, filters } = args;
-            
-            // Emit initial progress
-            user.emit('tool.output.chunk', {
-                object: 'tool.output.chunk',
-                toolCallId: id,
-                data: `Describing route tables in ${account}/${region}...`
-            });
+            const { region, routeTableIds, filters } = args;
 
             const command = new DescribeRouteTablesCommand({ 
                 RouteTableIds: routeTableIds,
                 Filters: filters 
             });
-            const response = await this.executeWithCommand({ command, account, region });
+            const response = await this.executeWithCommand({ command, region });
             
             return response;
 
         } catch (error) {
             logger.error(`Error describing route tables: ${error.message}`);
-            user.emit('tool.error', {
-                object: 'tool.error',
-                toolCallId: id,
-                data: error.message
-            });
             throw error;
         }
     }
@@ -671,8 +520,7 @@ export class DescribeVpcPeeringConnections extends EC2Tool {
         super('DescribeVpcPeeringConnections', 'Retrieves information about VPC peering connections.', {
             type: 'object',
             properties: {
-                account,
-                region,
+                region: { type: 'string', description: 'The AWS region to use. This is probably ca-central-1 (default), unless otherwise specified.', default: 'ca-central-1' },
                 vpcPeeringConnectionIds: {
                     type: 'array',
                     items: { type: 'string' },
@@ -695,36 +543,24 @@ export class DescribeVpcPeeringConnections extends EC2Tool {
                     description: 'Filters to apply for the VPC peering connections (optional).'
                 }
             },
-            required: ['account', 'region']
+            required: ['region']
         });
     }
 
     async call(id, args, context, streamManager, user) {
         try {
-            const { account, region, vpcPeeringConnectionIds, filters } = args;
-            
-            // Emit initial progress
-            user.emit('tool.output.chunk', {
-                object: 'tool.output.chunk',
-                toolCallId: id,
-                data: `Describing VPC peering connections in ${account}/${region}...`
-            });
+            const { region, vpcPeeringConnectionIds, filters } = args;
 
             const command = new DescribeVpcPeeringConnectionsCommand({ 
                 VpcPeeringConnectionIds: vpcPeeringConnectionIds,
                 Filters: filters 
             });
-            const response = await this.executeWithCommand({ command, account, region });
+            const response = await this.executeWithCommand({ command, region });
             
             return response;
 
         } catch (error) {
             logger.error(`Error describing VPC peering connections: ${error.message}`);
-            user.emit('tool.error', {
-                object: 'tool.error',
-                toolCallId: id,
-                data: error.message
-            });
             throw error;
         }
     }
@@ -735,8 +571,7 @@ export class DescribeInstanceStatus extends EC2Tool {
         super('DescribeInstanceStatus', 'Retrieves the status of one or more instances.', {
             type: 'object',
             properties: {
-                account,
-                region,
+                region: { type: 'string', description: 'The AWS region to use. This is probably ca-central-1 (default), unless otherwise specified.', default: 'ca-central-1' },
                 instanceIds: {
                     type: 'array',
                     items: { type: 'string' },
@@ -759,36 +594,24 @@ export class DescribeInstanceStatus extends EC2Tool {
                     description: 'Filters to apply for the instances (optional).'
                 }
             },
-            required: ['account', 'region']
+            required: ['region']
         });
     }
 
     async call(id, args, context, streamManager, user) {
         try {
-            const { account, region, instanceIds, filters } = args;
-            
-            // Emit initial progress
-            user.emit('tool.output.chunk', {
-                object: 'tool.output.chunk',
-                toolCallId: id,
-                data: `Describing instance status in ${account}/${region}...`
-            });
+            const { region, instanceIds, filters } = args;
 
             const command = new DescribeInstanceStatusCommand({ 
                 InstanceIds: instanceIds,
                 Filters: filters 
             });
-            const response = await this.executeWithCommand({ command, account, region });
+            const response = await this.executeWithCommand({ command, region });
             
             return response;
 
         } catch (error) {
             logger.error(`Error describing instance status: ${error.message}`);
-            user.emit('tool.error', {
-                object: 'tool.error',
-                toolCallId: id,
-                data: error.message
-            });
             throw error;
         }
     }
@@ -799,8 +622,7 @@ export class GetConsoleOutput extends EC2Tool {
         super('GetConsoleOutput', 'Retrieves the console output for a specified EC2 instance.', {
             type: 'object',
             properties: {
-                account,
-                region,
+                region: { type: 'string', description: 'The AWS region to use. This is probably ca-central-1 (default), unless otherwise specified.', default: 'ca-central-1' },
                 instanceId: {
                     type: 'string',
                     description: 'The ID of the instance.'
@@ -810,36 +632,24 @@ export class GetConsoleOutput extends EC2Tool {
                     description: 'Whether to retrieve the latest console output (optional).'
                 }
             },
-            required: ['instanceId', 'account', 'region']
+            required: ['instanceId', 'region']
         });
     }
 
     async call(id, args, context, streamManager, user) {
         try {
-            const { account, region, instanceId, latest } = args;
-            
-            // Emit initial progress
-            user.emit('tool.output.chunk', {
-                object: 'tool.output.chunk',
-                toolCallId: id,
-                data: `Getting console output for instance ${instanceId} in ${account}/${region}...`
-            });
+            const { region, instanceId, latest } = args;
 
             const command = new GetConsoleOutputCommand({ 
                 InstanceId: instanceId,
                 Latest: latest 
             });
-            const response = await this.executeWithCommand({ command, account, region });
+            const response = await this.executeWithCommand({ command, region });
             
             return response;
 
         } catch (error) {
             logger.error(`Error getting console output: ${error.message}`);
-            user.emit('tool.error', {
-                object: 'tool.error',
-                toolCallId: id,
-                data: error.message
-            });
             throw error;
         }
     }
@@ -850,8 +660,7 @@ export class DescribeImageAttribute extends EC2Tool {
         super('DescribeImageAttribute', 'Retrieves specific attributes of an Amazon Machine Image (AMI).', {
             type: 'object',
             properties: {
-                account,
-                region,
+                region: { type: 'string', description: 'The AWS region to use. This is probably ca-central-1 (default), unless otherwise specified.', default: 'ca-central-1' },
                 imageId: {
                     type: 'string',
                     description: 'The ID of the AMI.'
@@ -861,36 +670,24 @@ export class DescribeImageAttribute extends EC2Tool {
                     description: 'The attribute of the AMI to describe (e.g., "description").'
                 }
             },
-            required: ['imageId', 'attribute', 'account', 'region']
+            required: ['imageId', 'attribute', 'region']
         });
     }
 
     async call(id, args, context, streamManager, user) {
         try {
-            const { account, region, imageId, attribute } = args;
-            
-            // Emit initial progress
-            user.emit('tool.output.chunk', {
-                object: 'tool.output.chunk',
-                toolCallId: id,
-                data: `Describing image attribute ${attribute} for image ${imageId} in ${account}/${region}...`
-            });
+            const { region, imageId, attribute } = args;
 
             const command = new DescribeImageAttributeCommand({ 
                 ImageId: imageId,
                 Attribute: attribute 
             });
-            const response = await this.executeWithCommand({ command, account, region });
+            const response = await this.executeWithCommand({ command, region });
             
             return response;
 
         } catch (error) {
             logger.error(`Error describing image attribute: ${error.message}`);
-            user.emit('tool.error', {
-                object: 'tool.error',
-                toolCallId: id,
-                data: error.message
-            });
             throw error;
         }
     }
@@ -901,8 +698,7 @@ export class DescribeLaunchTemplates extends EC2Tool {
         super('DescribeLaunchTemplates', 'Provides information about one or more EC2 launch templates.', {
             type: 'object',
             properties: {
-                account,
-                region,
+                region: { type: 'string', description: 'The AWS region to use. This is probably ca-central-1 (default), unless otherwise specified.', default: 'ca-central-1' },
                 launchTemplateIds: {
                     type: 'array',
                     items: { type: 'string' },
@@ -925,36 +721,24 @@ export class DescribeLaunchTemplates extends EC2Tool {
                     description: 'Filters to apply for the launch templates (optional).'
                 }
             },
-            required: ['account', 'region']
+            required: ['region']
         });
     }
 
     async call(id, args, context, streamManager, user) {
         try {
-            const { account, region, launchTemplateIds, filters } = args;
-            
-            // Emit initial progress
-            user.emit('tool.output.chunk', {
-                object: 'tool.output.chunk',
-                toolCallId: id,
-                data: `Describing launch templates in ${account}/${region}...`
-            });
+            const { region, launchTemplateIds, filters } = args;
 
             const command = new DescribeLaunchTemplatesCommand({ 
                 LaunchTemplateIds: launchTemplateIds,
                 Filters: filters 
             });
-            const response = await this.executeWithCommand({ command, account, region });
+            const response = await this.executeWithCommand({ command, region });
             
             return response;
 
         } catch (error) {
             logger.error(`Error describing launch templates: ${error.message}`);
-            user.emit('tool.error', {
-                object: 'tool.error',
-                toolCallId: id,
-                data: error.message
-            });
             throw error;
         }
     }
@@ -965,8 +749,7 @@ export class DescribeAddresses extends EC2Tool {
         super('DescribeAddresses', 'Lists and provides details about your Elastic IP addresses.', {
             type: 'object',
             properties: {
-                account,
-                region,
+                region: { type: 'string', description: 'The AWS region to use. This is probably ca-central-1 (default), unless otherwise specified.', default: 'ca-central-1' },
                 publicIps: {
                     type: 'array',
                     items: { type: 'string' },
@@ -978,36 +761,24 @@ export class DescribeAddresses extends EC2Tool {
                     description: 'Array of allocation IDs (optional).'
                 }
             },
-            required: ['account', 'region']
+            required: ['region']
         });
     }
 
     async call(id, args, context, streamManager, user) {
         try {
-            const { account, region, publicIps, allocationIds } = args;
-            
-            // Emit initial progress
-            user.emit('tool.output.chunk', {
-                object: 'tool.output.chunk',
-                toolCallId: id,
-                data: `Describing addresses in ${account}/${region}...`
-            });
+            const { region, publicIps, allocationIds } = args;
 
             const command = new DescribeAddressesCommand({ 
                 PublicIps: publicIps,
                 AllocationIds: allocationIds 
             });
-            const response = await this.executeWithCommand({ command, account, region });
+            const response = await this.executeWithCommand({ command, region });
             
             return response;
 
         } catch (error) {
             logger.error(`Error describing addresses: ${error.message}`);
-            user.emit('tool.error', {
-                object: 'tool.error',
-                toolCallId: id,
-                data: error.message
-            });
             throw error;
         }
     }

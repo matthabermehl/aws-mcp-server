@@ -1,6 +1,6 @@
-import Tool from '../../models/Tool.js';
+import Tool from '../models/Tool.js';
 import dotenv from 'dotenv';
-import logger from '../../logger.js';
+import logger from '../logger.js';
 
 dotenv.config();
 
@@ -17,10 +17,8 @@ import {
     ListTagsForResourceCommand,
 } from "@aws-sdk/client-cloudwatch-logs";
 
-import { accountCredentials, defaultRegion } from '../config/awsConfig.js';
-
 // Helper function to truncate log lines and add AWS Console URLs
-const truncateLogLines = (response, account, region, logGroupName, logStreamName = null) => {
+const truncateLogLines = (response, region, logGroupName, logStreamName = null) => {
     if (!response) return response;
     
     // Construct base AWS Console URL
@@ -45,12 +43,12 @@ const truncateLogLines = (response, account, region, logGroupName, logStreamName
 
         response.events = response.events.map(event => ({
             ...event,
-            message: event.message?.length > 200 ? 
-                event.message.substring(0, 197) + '...' : 
+            message: event.message?.length > 200 ?
+                event.message.substring(0, 197) + '...' :
                 event.message,
             // Add stream URL for each event that has a stream name
-            consoleUrl: event.logStreamName ? 
-                `${logGroupUrl}/log-events/${encodeURIComponent(event.logStreamName)}` : 
+            consoleUrl: event.logStreamName ?
+                `${logGroupUrl}/log-events/${encodeURIComponent(event.logStreamName)}` :
                 undefined
         }));
     }
@@ -76,8 +74,8 @@ class CloudwatchLogsTool extends Tool {
         return pattern;
     }
 
-    async executeWithCommand({ command, account, region }) {
-        const cloudWatchLogsClient = this.getCloudWatchLogsClient(account, region);
+    async executeWithCommand({ command, region }) {
+        const cloudWatchLogsClient = this.getCloudWatchLogsClient(region);
         try {
             const response = await cloudWatchLogsClient.send(command);
             return response;
@@ -97,36 +95,21 @@ class CloudwatchLogsTool extends Tool {
         }
     }
 
-    getCloudWatchLogsClient(account, region) {
-        const validAccounts = Object.keys(accountCredentials);
-        if (!validAccounts.includes(account)) {
-            throw new Error(`Invalid account. Must be one of: ${validAccounts.join(', ')}`);
-        }
-
-        const credentials = accountCredentials[account];
-        if (!credentials) {
-            throw new Error(`No credentials found for account: ${account}`);
-        }
-
+    getCloudWatchLogsClient(region) {
         return new CloudWatchLogsClient({
-            region: region || defaultRegion,
-            credentials,
+            region: region || process.env.AWS_DEFAULT_REGION,
             maxAttempts: 3,
             requestTimeout: 30000
         });
     }
 }
 
-const account = { type: 'string', description: 'The AWS account to use. One of "caredove-dev" or "caredove-prod".', default: 'caredove-dev' };
-const region = { type: 'string', description: 'The AWS region to use. This is probably ca-central-1 (default), unless otherwise specified.', default: 'ca-central-1' };
-
 export class DescribeLogGroups extends CloudwatchLogsTool {
     constructor() {
         super('DescribeLogGroups', 'Lists the log groups in your account.', {
             type: 'object',
             properties: {
-                account,
-                region,
+                region: { type: 'string', description: 'The AWS region to use. This is probably ca-central-1 (default), unless otherwise specified.', default: 'ca-central-1' },
                 logGroupNamePrefix: {
                     type: 'string',
                     description: 'The prefix to filter log groups by name (optional).'
@@ -136,36 +119,24 @@ export class DescribeLogGroups extends CloudwatchLogsTool {
                     description: 'The maximum number of log groups to return (optional).'
                 }
             },
-            required: ['account', 'region']
+            required: ['region']
         });
     }
 
     async call(id, args, context, streamManager, user) {
         try {
-            const { account, region, logGroupNamePrefix, limit } = args;
+            const { region, logGroupNamePrefix, limit } = args;
             
-            // Emit initial progress
-            user.emit('tool.output.chunk', {
-                object: 'tool.output.chunk',
-                toolCallId: id,
-                data: `Listing log groups in ${account}/${region}...`
-            });
-
             const command = new DescribeLogGroupsCommand({
                 logGroupNamePrefix: logGroupNamePrefix,
                 limit: limit
             });
-            const response = await this.executeWithCommand({ command, account, region });
+            const response = await this.executeWithCommand({ command, region });
             
             return response;
 
         } catch (error) {
             logger.error(`Error listing log groups: ${error.message}`);
-            user.emit('tool.error', {
-                object: 'tool.error',
-                toolCallId: id,
-                data: error.message
-            });
             throw error;
         }
     }
@@ -176,8 +147,7 @@ export class DescribeLogStreams extends CloudwatchLogsTool {
         super('DescribeLogStreams', 'Lists the log streams for a specified log group.', {
             type: 'object',
             properties: {
-                account,
-                region,
+                region: { type: 'string', description: 'The AWS region to use. This is probably ca-central-1 (default), unless otherwise specified.', default: 'ca-central-1' },
                 logGroupName: {
                     type: 'string',
                     description: 'The name of the log group.'
@@ -191,37 +161,25 @@ export class DescribeLogStreams extends CloudwatchLogsTool {
                     description: 'The maximum number of log streams to return (optional).'
                 }
             },
-            required: ['logGroupName', 'account', 'region']
+            required: ['logGroupName', 'region']
         });
     }
 
     async call(id, args, context, streamManager, user) {
         try {
-            const { account, region, logGroupName, logStreamNamePrefix, limit } = args;
+            const { region, logGroupName, logStreamNamePrefix, limit } = args;
             
-            // Emit initial progress
-            user.emit('tool.output.chunk', {
-                object: 'tool.output.chunk',
-                toolCallId: id,
-                data: `Listing log streams for group ${logGroupName} in ${account}/${region}...`
-            });
-
             const command = new DescribeLogStreamsCommand({
                 logGroupName: logGroupName,
                 logStreamNamePrefix: logStreamNamePrefix,
                 limit: limit
             });
-            const response = await this.executeWithCommand({ command, account, region });
+            const response = await this.executeWithCommand({ command, region });
             
             return response;
 
         } catch (error) {
             logger.error(`Error listing log streams: ${error.message}`);
-            user.emit('tool.error', {
-                object: 'tool.error',
-                toolCallId: id,
-                data: error.message
-            });
             throw error;
         }
     }
@@ -232,8 +190,7 @@ export class FilterLogEvents extends CloudwatchLogsTool {
         super('FilterLogEvents', 'Searches for log events across ALL streams in a log group. Use this when you want to search logs by time range or pattern without knowing specific stream names. This is the preferred method for searching logs.', {
             type: 'object',
             properties: {
-                account,
-                region,
+                region: { type: 'string', description: 'The AWS region to use. This is probably ca-central-1 (default), unless otherwise specified.', default: 'ca-central-1' },
                 logGroupName: {
                     type: 'string',
                     description: 'The name of the log group to search in.'
@@ -255,7 +212,7 @@ export class FilterLogEvents extends CloudwatchLogsTool {
                     description: 'The maximum number of log events to return (optional).'
                 }
             },
-            required: ['logGroupName', 'account', 'region']
+            required: ['logGroupName', 'region']
         });
     }
 
@@ -270,18 +227,11 @@ export class FilterLogEvents extends CloudwatchLogsTool {
                 limit: args.limit
             });
 
-            const { account, region, logGroupName, filterPattern, startTime, endTime, limit } = args;
+            const { region, logGroupName, filterPattern, startTime, endTime, limit } = args;
             
             // Ensure log group name starts with a forward slash
             const formattedLogGroupName = logGroupName.startsWith('/') ? logGroupName : `/${logGroupName}`;
             
-            // Emit initial progress
-            user.emit('tool.output.chunk', {
-                object: 'tool.output.chunk',
-                toolCallId: id,
-                data: `Filtering log events for group ${formattedLogGroupName} in ${account}/${region}...`
-            });
-
             // Format the filter pattern using CloudWatch's regex syntax
             const formattedPattern = filterPattern ? this.formatFilterPattern(filterPattern) : filterPattern;
             logger.debug('Using filter pattern:', { 
@@ -299,19 +249,14 @@ export class FilterLogEvents extends CloudwatchLogsTool {
                 limit: limit
             });
 
-            const response = await this.executeWithCommand({ command, account, region });
+            const response = await this.executeWithCommand({ command, region });
             console.log('FilterLogEvents response:', response);
             
             // Truncate log messages and add console URLs before returning
-            return truncateLogLines(response, account, region, formattedLogGroupName);
+            return truncateLogLines(response, region, formattedLogGroupName);
 
         } catch (error) {
             logger.error(`Error filtering log events: ${error.message}`);
-            user.emit('tool.error', {
-                object: 'tool.error',
-                toolCallId: id,
-                data: error.message
-            });
             throw error;
         }
     }
@@ -322,8 +267,7 @@ export class GetLogEvents extends CloudwatchLogsTool {
         super('GetLogEvents', 'Retrieves log events from a SPECIFIC log stream. Only use this when you know both the log group AND specific stream name. For general log searching, use FilterLogEvents instead.', {
             type: 'object',
             properties: {
-                account,
-                region,
+                region: { type: 'string', description: 'The AWS region to use. This is probably ca-central-1 (default), unless otherwise specified.', default: 'ca-central-1' },
                 logGroupName: {
                     type: 'string',
                     description: 'The name of the log group.'
@@ -341,39 +285,27 @@ export class GetLogEvents extends CloudwatchLogsTool {
                     description: 'The maximum number of log events to return (optional).'
                 }
             },
-            required: ['logGroupName', 'logStreamName', 'account', 'region']
+            required: ['logGroupName', 'logStreamName', 'region']
         });
     }
 
     async call(id, args, context, streamManager, user) {
         try {
-            const { account, region, logGroupName, logStreamName, startFromHead, limit } = args;
+            const { region, logGroupName, logStreamName, startFromHead, limit } = args;
             
-            // Emit initial progress
-            user.emit('tool.output.chunk', {
-                object: 'tool.output.chunk',
-                toolCallId: id,
-                data: `Getting log events from stream ${logStreamName} in group ${logGroupName} (${account}/${region})...`
-            });
-
             const command = new GetLogEventsCommand({
                 logGroupName: logGroupName,
                 logStreamName: logStreamName,
                 startFromHead: startFromHead,
                 limit: limit
             });
-            const response = await this.executeWithCommand({ command, account, region });
+            const response = await this.executeWithCommand({ command, region });
             
             // Truncate log messages and add console URLs before returning
-            return truncateLogLines(response, account, region, logGroupName, logStreamName);
+            return truncateLogLines(response, region, logGroupName, logStreamName);
 
         } catch (error) {
             logger.error(`Error getting log events: ${error.message}`);
-            user.emit('tool.error', {
-                object: 'tool.error',
-                toolCallId: id,
-                data: error.message
-            });
             throw error;
         }
     }
@@ -384,8 +316,7 @@ export class StartQuery extends CloudwatchLogsTool {
         super('StartQuery', 'Starts a query for log events in the specified log group.', {
             type: 'object',
             properties: {
-                account,
-                region,
+                region: { type: 'string', description: 'The AWS region to use. This is probably ca-central-1 (default), unless otherwise specified.', default: 'ca-central-1' },
                 logGroupName: {
                     type: 'string',
                     description: 'The name of the log group.'
@@ -403,38 +334,26 @@ export class StartQuery extends CloudwatchLogsTool {
                     description: 'The end time of the query (in milliseconds since epoch).'
                 }
             },
-            required: ['logGroupName', 'queryString', 'startTime', 'endTime', 'account', 'region']
+            required: ['logGroupName', 'queryString', 'startTime', 'endTime', 'region']
         });
     }
 
     async call(id, args, context, streamManager, user) {
         try {
-            const { account, region, logGroupName, queryString, startTime, endTime } = args;
+            const { region, logGroupName, queryString, startTime, endTime } = args;
             
-            // Emit initial progress
-            user.emit('tool.output.chunk', {
-                object: 'tool.output.chunk',
-                toolCallId: id,
-                data: `Starting query on log group ${logGroupName} in ${account}/${region}...`
-            });
-
             const command = new StartQueryCommand({
                 logGroupName: logGroupName,
                 queryString: queryString,
                 startTime: startTime,
                 endTime: endTime
             });
-            const response = await this.executeWithCommand({ command, account, region });
+            const response = await this.executeWithCommand({ command, region });
             
             return response;
 
         } catch (error) {
             logger.error(`Error starting query: ${error.message}`);
-            user.emit('tool.error', {
-                object: 'tool.error',
-                toolCallId: id,
-                data: error.message
-            });
             throw error;
         }
     }
@@ -445,42 +364,29 @@ export class GetQueryResults extends CloudwatchLogsTool {
         super('GetQueryResults', 'Retrieves the results of a query that was started using StartQuery.', {
             type: 'object',
             properties: {
-                account,
-                region,
+                region: { type: 'string', description: 'The AWS region to use. This is probably ca-central-1 (default), unless otherwise specified.', default: 'ca-central-1' },
                 queryId: {
                     type: 'string',
                     description: 'The ID of the query.'
                 }
             },
-            required: ['queryId', 'account', 'region']
+            required: ['queryId', 'region']
         });
     }
 
     async call(id, args, context, streamManager, user) {
         try {
-            const { account, region, queryId } = args;
+            const { region, queryId } = args;
             
-            // Emit initial progress
-            user.emit('tool.output.chunk', {
-                object: 'tool.output.chunk',
-                toolCallId: id,
-                data: `Getting query results for ${queryId} in ${account}/${region}...`
-            });
-
             const command = new GetQueryResultsCommand({
                 QueryId: queryId
             });
-            const response = await this.executeWithCommand({ command, account, region });
+            const response = await this.executeWithCommand({ command, region });
             
             return response;
 
         } catch (error) {
             logger.error(`Error getting query results: ${error.message}`);
-            user.emit('tool.error', {
-                object: 'tool.error',
-                toolCallId: id,
-                data: error.message
-            });
             throw error;
         }
     }
@@ -491,8 +397,7 @@ export class DescribeQueries extends CloudwatchLogsTool {
         super('DescribeQueries', 'Lists the queries that are currently running or have been run in the specified log group.', {
             type: 'object',
             properties: {
-                account,
-                region,
+                region: { type: 'string', description: 'The AWS region to use. This is probably ca-central-1 (default), unless otherwise specified.', default: 'ca-central-1' },
                 logGroupName: {
                     type: 'string',
                     description: 'The name of the log group.'
@@ -506,37 +411,25 @@ export class DescribeQueries extends CloudwatchLogsTool {
                     description: 'The maximum number of queries to return (optional).'
                 }
             },
-            required: ['logGroupName', 'account', 'region']
+            required: ['logGroupName', 'region']
         });
     }
 
     async call(id, args, context, streamManager, user) {
         try {
-            const { account, region, logGroupName, status, limit } = args;
+            const { region, logGroupName, status, limit } = args;
             
-            // Emit initial progress
-            user.emit('tool.output.chunk', {
-                object: 'tool.output.chunk',
-                toolCallId: id,
-                data: `Describing queries for log group ${logGroupName} in ${account}/${region}...`
-            });
-
             const command = new DescribeQueriesCommand({
                 logGroupName: logGroupName,
                 status: status,
                 limit: limit
             });
-            const response = await this.executeWithCommand({ command, account, region });
+            const response = await this.executeWithCommand({ command, region });
             
             return response;
 
         } catch (error) {
             logger.error(`Error describing queries: ${error.message}`);
-            user.emit('tool.error', {
-                object: 'tool.error',
-                toolCallId: id,
-                data: error.message
-            });
             throw error;
         }
     }
@@ -547,42 +440,29 @@ export class GetLogRecord extends CloudwatchLogsTool {
         super('GetLogRecord', 'Retrieves a log record from the specified log group.', {
             type: 'object',
             properties: {
-                account,
-                region,
+                region: { type: 'string', description: 'The AWS region to use. This is probably ca-central-1 (default), unless otherwise specified.', default: 'ca-central-1' },
                 logRecordPointer: {
                     type: 'string',
                     description: 'The pointer to the log record.'
                 }
             },
-            required: ['logRecordPointer', 'account', 'region']
+            required: ['logRecordPointer', 'region']
         });
     }
 
     async call(id, args, context, streamManager, user) {
         try {
-            const { account, region, logRecordPointer } = args;
+            const { region, logRecordPointer } = args;
             
-            // Emit initial progress
-            user.emit('tool.output.chunk', {
-                object: 'tool.output.chunk',
-                toolCallId: id,
-                data: `Getting log record in ${account}/${region}...`
-            });
-
             const command = new GetLogRecordCommand({
                 logRecordPointer: logRecordPointer
             });
-            const response = await this.executeWithCommand({ command, account, region });
+            const response = await this.executeWithCommand({ command, region });
             
             return response;
 
         } catch (error) {
             logger.error(`Error getting log record: ${error.message}`);
-            user.emit('tool.error', {
-                object: 'tool.error',
-                toolCallId: id,
-                data: error.message
-            });
             throw error;
         }
     }
@@ -593,42 +473,29 @@ export class ListTagsForCloudwatchResource extends CloudwatchLogsTool {
         super('ListTagsForCloudwatchResource', 'Lists the tags for a specified resource.', {
             type: 'object',
             properties: {
-                account,
-                region,
+                region: { type: 'string', description: 'The AWS region to use. This is probably ca-central-1 (default), unless otherwise specified.', default: 'ca-central-1' },
                 resourceArn: {
                     type: 'string',
                     description: 'The ARN of the resource.'
                 }
             },
-            required: ['resourceArn', 'account', 'region']
+            required: ['resourceArn', 'region']
         });
     }
 
     async call(id, args, context, streamManager, user) {
         try {
-            const { account, region, resourceArn } = args;
+            const { region, resourceArn } = args;
             
-            // Emit initial progress
-            user.emit('tool.output.chunk', {
-                object: 'tool.output.chunk',
-                toolCallId: id,
-                data: `Listing tags for resource ${resourceArn} in ${account}/${region}...`
-            });
-
             const command = new ListTagsForResourceCommand({
                 resourceArn: resourceArn
             });
-            const response = await this.executeWithCommand({ command, account, region });
+            const response = await this.executeWithCommand({ command, region });
             
             return response;
 
         } catch (error) {
             logger.error(`Error listing tags: ${error.message}`);
-            user.emit('tool.error', {
-                object: 'tool.error',
-                toolCallId: id,
-                data: error.message
-            });
             throw error;
         }
     }

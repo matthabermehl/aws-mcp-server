@@ -1,6 +1,6 @@
-import Tool from '../../models/Tool.js';
+import Tool from '../models/Tool.js';
 import dotenv from 'dotenv';
-import logger from '../../logger.js';
+import logger from '../logger.js';
 
 dotenv.config();
 
@@ -38,22 +38,9 @@ import {
   ListPartsCommand,
 } from "@aws-sdk/client-s3";
 
-import { accountCredentials, defaultRegion } from '../config/awsConfig.js';
-
-const getS3Client = (account, region) => {
-  const validAccounts = Object.keys(accountCredentials);
-  if (!validAccounts.includes(account)) {
-    throw new Error(`Invalid account. Must be one of: ${validAccounts.join(', ')}`);
-  }
-
-  const credentials = accountCredentials[account];
-  if (!credentials) {
-    throw new Error(`No credentials found for account: ${account}`);
-  }
-
+const getS3Client = (region) => {
   return new S3Client({
-    region: region || defaultRegion,
-    credentials,
+    region: region || process.env.AWS_DEFAULT_REGION,
     maxAttempts: 3,
     requestTimeout: 5000
   });
@@ -64,8 +51,8 @@ class S3Tool extends Tool {
     super(name, description, parameters);
   }
 
-  async executeWithCommand({ command, account, region }) {
-    const s3Client = getS3Client(account, region);
+  async executeWithCommand({ command, region }) {
+    const s3Client = getS3Client(region);
     try {
       const response = await s3Client.send(command);
       return response;
@@ -76,9 +63,6 @@ class S3Tool extends Tool {
   }
 }
 
-const account = { type: 'string', description: 'The AWS account to use. One of "caredove-dev" or "caredove-prod".', default: 'caredove-dev' };
-const region = { type: 'string', description: 'The AWS region to use. This is probably ca-central-1 (default), unless otherwise specified.', default: 'ca-central-1' };
-
 /**
  * Retrieves the Transfer Acceleration state of a specified S3 bucket.
  */
@@ -87,40 +71,27 @@ export class GetBucketAccelerateConfiguration extends S3Tool {
     super('GetBucketAccelerateConfiguration', 'Retrieves the Transfer Acceleration state of a specified Amazon S3 bucket.', {
       type: 'object',
       properties: {
-        account,
-        region,
+        region: { type: 'string', description: 'The AWS region to use. This is probably ca-central-1 (default), unless otherwise specified.', default: 'ca-central-1' },
         bucketName: {
           type: 'string',
           description: 'The name of the S3 bucket.'
         }
       },
-      required: ['bucketName', 'account', 'region']
+      required: ['bucketName', 'region']
     });
   }
 
   async call(id, args, context, streamManager, user) {
     try {
-      const { account, region, bucketName } = args;
+      const { region, bucketName } = args;
       
-      // Emit initial progress
-      user.emit('tool.output.chunk', {
-        object: 'tool.output.chunk',
-        toolCallId: id,
-        data: `Getting bucket acceleration configuration for ${bucketName} in ${account}/${region}...`
-      });
-
       const command = new GetBucketAccelerateConfigurationCommand({ Bucket: bucketName });
-      const response = await this.executeWithCommand({ command, account, region });
+      const response = await this.executeWithCommand({ command, region });
       
       return response;
 
     } catch (error) {
       logger.error(`Error getting bucket acceleration config: ${error.message}`);
-      user.emit('tool.error', {
-        object: 'tool.error',
-        toolCallId: id,
-        data: error.message
-      });
       throw error;
     }
   }
@@ -134,36 +105,23 @@ export class ListBuckets extends S3Tool {
     super('ListBuckets', 'Returns a list of all buckets owned by the authenticated sender of the request.', {
       type: 'object',
       properties: {
-        account,
-        region,
+        region: { type: 'string', description: 'The AWS region to use. This is probably ca-central-1 (default), unless otherwise specified.', default: 'ca-central-1' },
       },
-      required: ['account', 'region']
+      required: ['region']
     });
   }
 
   async call(id, args, context, streamManager, user) {
     try {
-      const { account, region } = args;
+      const { region } = args;
       
-      // Emit initial progress
-      user.emit('tool.output.chunk', {
-        object: 'tool.output.chunk',
-        toolCallId: id,
-        data: `Listing buckets in ${account}/${region}...`
-      });
-
       const command = new ListBucketsCommand({});
-      const response = await this.executeWithCommand({ command, account, region });
+      const response = await this.executeWithCommand({ command, region });
       
       return response;
 
     } catch (error) {
       logger.error(`Error listing buckets: ${error.message}`);
-      user.emit('tool.error', {
-        object: 'tool.error',
-        toolCallId: id,
-        data: error.message
-      });
       throw error;
     }
   }
@@ -177,40 +135,27 @@ export class GetBucketAcl extends S3Tool {
     super('GetBucketAcl', 'Returns the Access Control List (ACL) of a specified S3 bucket, detailing the permissions granted on the bucket.', {
       type: 'object',
       properties: {
-        account,
-        region,
+        region: { type: 'string', description: 'The AWS region to use. This is probably ca-central-1 (default), unless otherwise specified.', default: 'ca-central-1' },
         bucketName: {
           type: 'string',
           description: 'The name of the S3 bucket.'
         }
       },
-      required: ['bucketName', 'account', 'region']
+      required: ['bucketName', 'region']
     });
   }
 
   async call(id, args, context, streamManager, user) {
     try {
-      const { account, region, bucketName } = args;
+      const { region, bucketName } = args;
       
-      // Emit initial progress
-      user.emit('tool.output.chunk', {
-        object: 'tool.output.chunk',
-        toolCallId: id,
-        data: `Getting bucket ACL for ${bucketName} in ${account}/${region}...`
-      });
-
       const command = new GetBucketAclCommand({ Bucket: bucketName });
-      const response = await this.executeWithCommand({ command, account, region });
+      const response = await this.executeWithCommand({ command, region });
       
       return response;
 
     } catch (error) {
       logger.error(`Error getting bucket ACL: ${error.message}`);
-      user.emit('tool.error', {
-        object: 'tool.error',
-        toolCallId: id,
-        data: error.message
-      });
       throw error;
     }
   }
@@ -224,8 +169,7 @@ export class GetBucketAnalyticsConfiguration extends S3Tool {
     super('GetBucketAnalyticsConfiguration', 'Retrieves an analytics configuration from the specified bucket.', {
       type: 'object',
       properties: {
-        account,
-        region,
+        region: { type: 'string', description: 'The AWS region to use. This is probably ca-central-1 (default), unless otherwise specified.', default: 'ca-central-1' },
         bucketName: {
           type: 'string',
           description: 'The name of the S3 bucket.'
@@ -235,33 +179,21 @@ export class GetBucketAnalyticsConfiguration extends S3Tool {
           description: 'The ID that identifies the analytics configuration.'
         }
       },
-      required: ['bucketName', 'id', 'account', 'region']
+      required: ['bucketName', 'id', 'region']
     });
   }
 
   async call(id, args, context, streamManager, user) {
     try {
-      const { account, region, bucketName, id: configId } = args;
+      const { region, bucketName, id: configId } = args;
       
-      // Emit initial progress
-      user.emit('tool.output.chunk', {
-        object: 'tool.output.chunk',
-        toolCallId: id,
-        data: `Getting bucket analytics configuration ${configId} for ${bucketName} in ${account}/${region}...`
-      });
-
       const command = new GetBucketAnalyticsConfigurationCommand({ Bucket: bucketName, Id: configId });
-      const response = await this.executeWithCommand({ command, account, region });
+      const response = await this.executeWithCommand({ command, region });
       
       return response;
 
     } catch (error) {
       logger.error(`Error getting bucket analytics config: ${error.message}`);
-      user.emit('tool.error', {
-        object: 'tool.error',
-        toolCallId: id,
-        data: error.message
-      });
       throw error;
     }
   }
@@ -275,40 +207,27 @@ export class GetBucketCors extends S3Tool {
     super('GetBucketCors', 'Returns the CORS configuration of a bucket.', {
       type: 'object',
       properties: {
-        account,
-        region,
+        region: { type: 'string', description: 'The AWS region to use. This is probably ca-central-1 (default), unless otherwise specified.', default: 'ca-central-1' },
         bucketName: {
           type: 'string',
           description: 'The name of the S3 bucket.'
         }
       },
-      required: ['bucketName', 'account', 'region']
+      required: ['bucketName', 'region']
     });
   }
 
   async call(id, args, context, streamManager, user) {
     try {
-      const { account, region, bucketName } = args;
+      const { region, bucketName } = args;
       
-      // Emit initial progress
-      user.emit('tool.output.chunk', {
-        object: 'tool.output.chunk',
-        toolCallId: id,
-        data: `Getting bucket CORS configuration for ${bucketName} in ${account}/${region}...`
-      });
-
       const command = new GetBucketCorsCommand({ Bucket: bucketName });
-      const response = await this.executeWithCommand({ command, account, region });
+      const response = await this.executeWithCommand({ command, region });
       
       return response;
 
     } catch (error) {
       logger.error(`Error getting bucket CORS config: ${error.message}`);
-      user.emit('tool.error', {
-        object: 'tool.error',
-        toolCallId: id,
-        data: error.message
-      });
       throw error;
     }
   }
@@ -322,40 +241,27 @@ export class GetBucketEncryption extends S3Tool {
     super('GetBucketEncryption', 'Retrieves the default encryption configuration for a specified S3 bucket.', {
       type: 'object',
       properties: {
-        account,
-        region,
+        region: { type: 'string', description: 'The AWS region to use. This is probably ca-central-1 (default), unless otherwise specified.', default: 'ca-central-1' },
         bucketName: {
           type: 'string',
           description: 'The name of the S3 bucket.'
         }
       },
-      required: ['bucketName', 'account', 'region']
+      required: ['bucketName', 'region']
     });
   }
 
   async call(id, args, context, streamManager, user) {
     try {
-      const { account, region, bucketName } = args;
+      const { region, bucketName } = args;
       
-      // Emit initial progress
-      user.emit('tool.output.chunk', {
-        object: 'tool.output.chunk',
-        toolCallId: id,
-        data: `Getting bucket encryption configuration for ${bucketName} in ${account}/${region}...`
-      });
-
       const command = new GetBucketEncryptionCommand({ Bucket: bucketName });
-      const response = await this.executeWithCommand({ command, account, region });
+      const response = await this.executeWithCommand({ command, region });
       
       return response;
 
     } catch (error) {
       logger.error(`Error getting bucket encryption: ${error.message}`);
-      user.emit('tool.error', {
-        object: 'tool.error',
-        toolCallId: id,
-        data: error.message
-      });
       throw error;
     }
   }
@@ -369,8 +275,7 @@ export class GetBucketIntelligentTieringConfiguration extends S3Tool {
     super('GetBucketIntelligentTieringConfiguration', 'Retrieves the S3 Intelligent-Tiering configuration from the specified bucket.', {
       type: 'object',
       properties: {
-        account,
-        region,
+        region: { type: 'string', description: 'The AWS region to use. This is probably ca-central-1 (default), unless otherwise specified.', default: 'ca-central-1' },
         bucketName: {
           type: 'string',
           description: 'The name of the S3 bucket.'
@@ -380,33 +285,21 @@ export class GetBucketIntelligentTieringConfiguration extends S3Tool {
           description: 'The ID used to identify the Intelligent-Tiering configuration.'
         }
       },
-      required: ['bucketName', 'id', 'account', 'region']
+      required: ['bucketName', 'id', 'region']
     });
   }
 
   async call(id, args, context, streamManager, user) {
     try {
-      const { account, region, bucketName, id: configId } = args;
+      const { region, bucketName, id: configId } = args;
       
-      // Emit initial progress
-      user.emit('tool.output.chunk', {
-        object: 'tool.output.chunk',
-        toolCallId: id,
-        data: `Getting Intelligent-Tiering configuration ${configId} for bucket ${bucketName} in ${account}/${region}...`
-      });
-
       const command = new GetBucketIntelligentTieringConfigurationCommand({ Bucket: bucketName, Id: configId });
-      const response = await this.executeWithCommand({ command, account, region });
+      const response = await this.executeWithCommand({ command, region });
       
       return response;
 
     } catch (error) {
       logger.error(`Error getting bucket Intelligent-Tiering config: ${error.message}`);
-      user.emit('tool.error', {
-        object: 'tool.error',
-        toolCallId: id,
-        data: error.message
-      });
       throw error;
     }
   }
@@ -420,8 +313,7 @@ export class GetBucketInventoryConfiguration extends S3Tool {
     super('GetBucketInventoryConfiguration', 'Returns an inventory configuration from the specified bucket.', {
       type: 'object',
       properties: {
-        account,
-        region,
+        region: { type: 'string', description: 'The AWS region to use. This is probably ca-central-1 (default), unless otherwise specified.', default: 'ca-central-1' },
         bucketName: {
           type: 'string',
           description: 'The name of the S3 bucket.'
@@ -431,33 +323,21 @@ export class GetBucketInventoryConfiguration extends S3Tool {
           description: 'The ID that identifies the inventory configuration.'
         }
       },
-      required: ['bucketName', 'id', 'account', 'region']
+      required: ['bucketName', 'id', 'region']
     });
   }
 
   async call(id, args, context, streamManager, user) {
     try {
-      const { account, region, bucketName, id: configId } = args;
+      const { region, bucketName, id: configId } = args;
       
-      // Emit initial progress
-      user.emit('tool.output.chunk', {
-        object: 'tool.output.chunk',
-        toolCallId: id,
-        data: `Getting inventory configuration ${configId} for bucket ${bucketName} in ${account}/${region}...`
-      });
-
       const command = new GetBucketInventoryConfigurationCommand({ Bucket: bucketName, Id: configId });
-      const response = await this.executeWithCommand({ command, account, region });
+      const response = await this.executeWithCommand({ command, region });
       
       return response;
 
     } catch (error) {
       logger.error(`Error getting bucket inventory config: ${error.message}`);
-      user.emit('tool.error', {
-        object: 'tool.error',
-        toolCallId: id,
-        data: error.message
-      });
       throw error;
     }
   }
@@ -471,40 +351,27 @@ export class GetBucketLifecycleConfiguration extends S3Tool {
     super('GetBucketLifecycleConfiguration', 'Returns the lifecycle configuration of a bucket.', {
       type: 'object',
       properties: {
-        account,
-        region,
+        region: { type: 'string', description: 'The AWS region to use. This is probably ca-central-1 (default), unless otherwise specified.', default: 'ca-central-1' },
         bucketName: {
           type: 'string',
           description: 'The name of the S3 bucket.'
         }
       },
-      required: ['bucketName', 'account', 'region']
+      required: ['bucketName', 'region']
     });
   }
 
   async call(id, args, context, streamManager, user) {
     try {
-      const { account, region, bucketName } = args;
+      const { region, bucketName } = args;
       
-      // Emit initial progress
-      user.emit('tool.output.chunk', {
-        object: 'tool.output.chunk',
-        toolCallId: id,
-        data: `Getting lifecycle configuration for bucket ${bucketName} in ${account}/${region}...`
-      });
-
       const command = new GetBucketLifecycleConfigurationCommand({ Bucket: bucketName });
-      const response = await this.executeWithCommand({ command, account, region });
+      const response = await this.executeWithCommand({ command, region });
       
       return response;
 
     } catch (error) {
       logger.error(`Error getting bucket lifecycle config: ${error.message}`);
-      user.emit('tool.error', {
-        object: 'tool.error',
-        toolCallId: id,
-        data: error.message
-      });
       throw error;
     }
   }
@@ -518,40 +385,27 @@ export class GetBucketLocation extends S3Tool {
     super('GetBucketLocation', 'Returns the AWS Region where the specified bucket resides.', {
       type: 'object',
       properties: {
-        account,
-        region,
+        region: { type: 'string', description: 'The AWS region to use. This is probably ca-central-1 (default), unless otherwise specified.', default: 'ca-central-1' },
         bucketName: {
           type: 'string',
           description: 'The name of the S3 bucket.'
         }
       },
-      required: ['bucketName', 'account', 'region']
+      required: ['bucketName', 'region']
     });
   }
 
   async call(id, args, context, streamManager, user) {
     try {
-      const { account, bucketName } = args;
+      const { bucketName } = args;
       
-      // Emit initial progress
-      user.emit('tool.output.chunk', {
-        object: 'tool.output.chunk',
-        toolCallId: id,
-        data: `Getting bucket location for ${bucketName} in ${account}...`
-      });
-
       const command = new GetBucketLocationCommand({ Bucket: bucketName });
-      const response = await this.executeWithCommand({ command, account, region: undefined });
+      const response = await this.executeWithCommand({ command, region: undefined });
       
       return response;
 
     } catch (error) {
       logger.error(`Error getting bucket location: ${error.message}`);
-      user.emit('tool.error', {
-        object: 'tool.error',
-        toolCallId: id,
-        data: error.message
-      });
       throw error;
     }
   }
@@ -565,40 +419,27 @@ export class GetBucketLogging extends S3Tool {
     super('GetBucketLogging', 'Returns the logging status of a bucket and the permissions users have to view and modify that status.', {
       type: 'object',
       properties: {
-        account,
-        region,
+        region: { type: 'string', description: 'The AWS region to use. This is probably ca-central-1 (default), unless otherwise specified.', default: 'ca-central-1' },
         bucketName: {
           type: 'string',
           description: 'The name of the S3 bucket.'
         }
       },
-      required: ['bucketName', 'account', 'region']
+      required: ['bucketName', 'region']
     });
   }
 
   async call(id, args, context, streamManager, user) {
     try {
-      const { account, region, bucketName } = args;
+      const { region, bucketName } = args;
       
-      // Emit initial progress
-      user.emit('tool.output.chunk', {
-        object: 'tool.output.chunk',
-        toolCallId: id,
-        data: `Getting bucket logging configuration for ${bucketName} in ${account}/${region}...`
-      });
-
       const command = new GetBucketLoggingCommand({ Bucket: bucketName });
-      const response = await this.executeWithCommand({ command, account, region });
+      const response = await this.executeWithCommand({ command, region });
       
       return response;
 
     } catch (error) {
       logger.error(`Error getting bucket logging: ${error.message}`);
-      user.emit('tool.error', {
-        object: 'tool.error',
-        toolCallId: id,
-        data: error.message
-      });
       throw error;
     }
   }
@@ -612,8 +453,7 @@ export class GetBucketMetricsConfiguration extends S3Tool {
     super('GetBucketMetricsConfiguration', 'Returns a metrics configuration from the specified bucket.', {
       type: 'object',
       properties: {
-        account,
-        region,
+        region: { type: 'string', description: 'The AWS region to use. This is probably ca-central-1 (default), unless otherwise specified.', default: 'ca-central-1' },
         bucketName: {
           type: 'string',
           description: 'The name of the S3 bucket.'
@@ -623,33 +463,21 @@ export class GetBucketMetricsConfiguration extends S3Tool {
           description: 'The ID used to identify the metrics configuration.'
         }
       },
-      required: ['bucketName', 'id', 'account', 'region']
+      required: ['bucketName', 'id', 'region']
     });
   }
 
   async call(id, args, context, streamManager, user) {
     try {
-      const { account, region, bucketName, id: configId } = args;
+      const { region, bucketName, id: configId } = args;
       
-      // Emit initial progress
-      user.emit('tool.output.chunk', {
-        object: 'tool.output.chunk',
-        toolCallId: id,
-        data: `Getting metrics configuration ${configId} for bucket ${bucketName} in ${account}/${region}...`
-      });
-
       const command = new GetBucketMetricsConfigurationCommand({ Bucket: bucketName, Id: configId });
-      const response = await this.executeWithCommand({ command, account, region });
+      const response = await this.executeWithCommand({ command, region });
       
       return response;
 
     } catch (error) {
       logger.error(`Error getting bucket metrics config: ${error.message}`);
-      user.emit('tool.error', {
-        object: 'tool.error',
-        toolCallId: id,
-        data: error.message
-      });
       throw error;
     }
   }
@@ -663,40 +491,27 @@ export class GetBucketNotificationConfiguration extends S3Tool {
     super('GetBucketNotificationConfiguration', 'Returns the notification configuration of a bucket.', {
       type: 'object',
       properties: {
-        account,
-        region,
+        region: { type: 'string', description: 'The AWS region to use. This is probably ca-central-1 (default), unless otherwise specified.', default: 'ca-central-1' },
         bucketName: {
           type: 'string',
           description: 'The name of the S3 bucket.'
         }
       },
-      required: ['bucketName', 'account', 'region']
+      required: ['bucketName', 'region']
     });
   }
 
   async call(id, args, context, streamManager, user) {
     try {
-      const { account, region, bucketName } = args;
+      const { region, bucketName } = args;
       
-      // Emit initial progress
-      user.emit('tool.output.chunk', {
-        object: 'tool.output.chunk',
-        toolCallId: id,
-        data: `Getting notification configuration for bucket ${bucketName} in ${account}/${region}...`
-      });
-
       const command = new GetBucketNotificationConfigurationCommand({ Bucket: bucketName });
-      const response = await this.executeWithCommand({ command, account, region });
+      const response = await this.executeWithCommand({ command, region });
       
       return response;
 
     } catch (error) {
       logger.error(`Error getting bucket notification config: ${error.message}`);
-      user.emit('tool.error', {
-        object: 'tool.error',
-        toolCallId: id,
-        data: error.message
-      });
       throw error;
     }
   }
@@ -710,40 +525,27 @@ export class GetBucketOwnershipControls extends S3Tool {
     super('GetBucketOwnershipControls', 'Retrieves OwnershipControls for an S3 bucket.', {
       type: 'object',
       properties: {
-        account,
-        region,
+        region: { type: 'string', description: 'The AWS region to use. This is probably ca-central-1 (default), unless otherwise specified.', default: 'ca-central-1' },
         bucketName: {
           type: 'string',
           description: 'The name of the S3 bucket.'
         }
       },
-      required: ['bucketName', 'account', 'region']
+      required: ['bucketName', 'region']
     });
   }
 
   async call(id, args, context, streamManager, user) {
     try {
-      const { account, region, bucketName } = args;
+      const { region, bucketName } = args;
       
-      // Emit initial progress
-      user.emit('tool.output.chunk', {
-        object: 'tool.output.chunk',
-        toolCallId: id,
-        data: `Getting ownership controls for bucket ${bucketName} in ${account}/${region}...`
-      });
-
       const command = new GetBucketOwnershipControlsCommand({ Bucket: bucketName });
-      const response = await this.executeWithCommand({ command, account, region });
+      const response = await this.executeWithCommand({ command, region });
       
       return response;
 
     } catch (error) {
       logger.error(`Error getting bucket ownership controls: ${error.message}`);
-      user.emit('tool.error', {
-        object: 'tool.error',
-        toolCallId: id,
-        data: error.message
-      });
       throw error;
     }
   }
@@ -757,40 +559,27 @@ export class GetBucketPolicy extends S3Tool {
     super('GetBucketPolicy', 'Returns the access policy of a specified bucket, detailing permissions and access rules.', {
       type: 'object',
       properties: {
-        account,
-        region,
+        region: { type: 'string', description: 'The AWS region to use. This is probably ca-central-1 (default), unless otherwise specified.', default: 'ca-central-1' },
         bucketName: {
           type: 'string',
           description: 'The name of the S3 bucket.'
         }
       },
-      required: ['bucketName', 'account', 'region']
+      required: ['bucketName', 'region']
     });
   }
 
   async call(id, args, context, streamManager, user) {
     try {
-      const { account, region, bucketName } = args;
+      const { region, bucketName } = args;
       
-      // Emit initial progress
-      user.emit('tool.output.chunk', {
-        object: 'tool.output.chunk',
-        toolCallId: id,
-        data: `Getting bucket policy for ${bucketName} in ${account}/${region}...`
-      });
-
       const command = new GetBucketPolicyCommand({ Bucket: bucketName });
-      const response = await this.executeWithCommand({ command, account, region });
+      const response = await this.executeWithCommand({ command, region });
       
       return response;
 
     } catch (error) {
       logger.error(`Error getting bucket policy: ${error.message}`);
-      user.emit('tool.error', {
-        object: 'tool.error',
-        toolCallId: id,
-        data: error.message
-      });
       throw error;
     }
   }
@@ -804,40 +593,27 @@ export class GetBucketPolicyStatus extends S3Tool {
     super('GetBucketPolicyStatus', 'Retrieves the policy status for a bucket.', {
       type: 'object',
       properties: {
-        account,
-        region,
+        region: { type: 'string', description: 'The AWS region to use. This is probably ca-central-1 (default), unless otherwise specified.', default: 'ca-central-1' },
         bucketName: {
           type: 'string',
           description: 'The name of the S3 bucket.'
         }
       },
-      required: ['bucketName', 'account', 'region']
+      required: ['bucketName', 'region']
     });
   }
 
   async call(id, args, context, streamManager, user) {
     try {
-      const { account, region, bucketName } = args;
+      const { region, bucketName } = args;
       
-      // Emit initial progress
-      user.emit('tool.output.chunk', {
-        object: 'tool.output.chunk',
-        toolCallId: id,
-        data: `Getting policy status for bucket ${bucketName} in ${account}/${region}...`
-      });
-
       const command = new GetBucketPolicyStatusCommand({ Bucket: bucketName });
-      const response = await this.executeWithCommand({ command, account, region });
+      const response = await this.executeWithCommand({ command, region });
       
       return response;
 
     } catch (error) {
       logger.error(`Error getting bucket policy status: ${error.message}`);
-      user.emit('tool.error', {
-        object: 'tool.error',
-        toolCallId: id,
-        data: error.message
-      });
       throw error;
     }
   }
@@ -851,40 +627,27 @@ export class GetBucketReplication extends S3Tool {
     super('GetBucketReplication', 'Returns the replication configuration of a bucket, detailing cross-region replication settings.', {
       type: 'object',
       properties: {
-        account,
-        region,
+        region: { type: 'string', description: 'The AWS region to use. This is probably ca-central-1 (default), unless otherwise specified.', default: 'ca-central-1' },
         bucketName: {
           type: 'string',
           description: 'The name of the S3 bucket.'
         }
       },
-      required: ['bucketName', 'account', 'region']
+      required: ['bucketName', 'region']
     });
   }
 
   async call(id, args, context, streamManager, user) {
     try {
-      const { account, region, bucketName } = args;
+      const { region, bucketName } = args;
       
-      // Emit initial progress
-      user.emit('tool.output.chunk', {
-        object: 'tool.output.chunk',
-        toolCallId: id,
-        data: `Getting bucket replication configuration for ${bucketName} in ${account}/${region}...`
-      });
-
       const command = new GetBucketReplicationCommand({ Bucket: bucketName });
-      const response = await this.executeWithCommand({ command, account, region });
+      const response = await this.executeWithCommand({ command, region });
       
       return response;
 
     } catch (error) {
       logger.error(`Error getting bucket replication: ${error.message}`);
-      user.emit('tool.error', {
-        object: 'tool.error',
-        toolCallId: id,
-        data: error.message
-      });
       throw error;
     }
   }
@@ -898,40 +661,27 @@ export class GetBucketRequestPayment extends S3Tool {
     super('GetBucketRequestPayment', 'Returns the request payment configuration of a bucket.', {
       type: 'object',
       properties: {
-        account,
-        region,
+        region: { type: 'string', description: 'The AWS region to use. This is probably ca-central-1 (default), unless otherwise specified.', default: 'ca-central-1' },
         bucketName: {
           type: 'string',
           description: 'The name of the S3 bucket.'
         }
       },
-      required: ['bucketName', 'account', 'region']
+      required: ['bucketName', 'region']
     });
   }
 
   async call(id, args, context, streamManager, user) {
     try {
-      const { account, region, bucketName } = args;
+      const { region, bucketName } = args;
       
-      // Emit initial progress
-      user.emit('tool.output.chunk', {
-        object: 'tool.output.chunk',
-        toolCallId: id,
-        data: `Getting request payment configuration for bucket ${bucketName} in ${account}/${region}...`
-      });
-
       const command = new GetBucketRequestPaymentCommand({ Bucket: bucketName });
-      const response = await this.executeWithCommand({ command, account, region });
+      const response = await this.executeWithCommand({ command, region });
       
       return response;
 
     } catch (error) {
       logger.error(`Error getting bucket request payment config: ${error.message}`);
-      user.emit('tool.error', {
-        object: 'tool.error',
-        toolCallId: id,
-        data: error.message
-      });
       throw error;
     }
   }
@@ -945,40 +695,27 @@ export class GetBucketTagging extends S3Tool {
     super('GetBucketTagging', 'Returns the tag set associated with the specified bucket.', {
       type: 'object',
       properties: {
-        account,
-        region,
+        region: { type: 'string', description: 'The AWS region to use. This is probably ca-central-1 (default), unless otherwise specified.', default: 'ca-central-1' },
         bucketName: {
           type: 'string',
           description: 'The name of the S3 bucket.'
         }
       },
-      required: ['bucketName', 'account', 'region']
+      required: ['bucketName', 'region']
     });
   }
 
   async call(id, args, context, streamManager, user) {
     try {
-      const { account, region, bucketName } = args;
+      const { region, bucketName } = args;
       
-      // Emit initial progress
-      user.emit('tool.output.chunk', {
-        object: 'tool.output.chunk',
-        toolCallId: id,
-        data: `Getting bucket tags for ${bucketName} in ${account}/${region}...`
-      });
-
       const command = new GetBucketTaggingCommand({ Bucket: bucketName });
-      const response = await this.executeWithCommand({ command, account, region });
+      const response = await this.executeWithCommand({ command, region });
       
       return response;
 
     } catch (error) {
       logger.error(`Error getting bucket tags: ${error.message}`);
-      user.emit('tool.error', {
-        object: 'tool.error',
-        toolCallId: id,
-        data: error.message
-      });
       throw error;
     }
   }
@@ -992,40 +729,27 @@ export class GetBucketVersioning extends S3Tool {
     super('GetBucketVersioning', 'Returns the versioning state of a bucket, indicating if versioning is enabled or suspended.', {
       type: 'object',
       properties: {
-        account,
-        region,
+        region: { type: 'string', description: 'The AWS region to use. This is probably ca-central-1 (default), unless otherwise specified.', default: 'ca-central-1' },
         bucketName: {
           type: 'string',
           description: 'The name of the S3 bucket.'
         }
       },
-      required: ['bucketName', 'account', 'region']
+      required: ['bucketName', 'region']
     });
   }
 
   async call(id, args, context, streamManager, user) {
     try {
-      const { account, region, bucketName } = args;
+      const { region, bucketName } = args;
       
-      // Emit initial progress
-      user.emit('tool.output.chunk', {
-        object: 'tool.output.chunk',
-        toolCallId: id,
-        data: `Getting bucket versioning configuration for ${bucketName} in ${account}/${region}...`
-      });
-
       const command = new GetBucketVersioningCommand({ Bucket: bucketName });
-      const response = await this.executeWithCommand({ command, account, region });
+      const response = await this.executeWithCommand({ command, region });
       
       return response;
 
     } catch (error) {
       logger.error(`Error getting bucket versioning: ${error.message}`);
-      user.emit('tool.error', {
-        object: 'tool.error',
-        toolCallId: id,
-        data: error.message
-      });
       throw error;
     }
   }
@@ -1039,40 +763,27 @@ export class GetBucketWebsite extends S3Tool {
     super('GetBucketWebsite', 'Retrieves the website configuration for a bucket.', {
       type: 'object',
       properties: {
-        account,
-        region,
+        region: { type: 'string', description: 'The AWS region to use. This is probably ca-central-1 (default), unless otherwise specified.', default: 'ca-central-1' },
         bucketName: {
           type: 'string',
           description: 'The name of the S3 bucket.'
         }
       },
-      required: ['bucketName', 'account', 'region']
+      required: ['bucketName', 'region']
     });
   }
 
   async call(id, args, context, streamManager, user) {
     try {
-      const { account, region, bucketName } = args;
+      const { region, bucketName } = args;
       
-      // Emit initial progress
-      user.emit('tool.output.chunk', {
-        object: 'tool.output.chunk',
-        toolCallId: id,
-        data: `Getting website configuration for bucket ${bucketName} in ${account}/${region}...`
-      });
-
       const command = new GetBucketWebsiteCommand({ Bucket: bucketName });
-      const response = await this.executeWithCommand({ command, account, region });
+      const response = await this.executeWithCommand({ command, region });
       
       return response;
 
     } catch (error) {
       logger.error(`Error getting bucket website config: ${error.message}`);
-      user.emit('tool.error', {
-        object: 'tool.error',
-        toolCallId: id,
-        data: error.message
-      });
       throw error;
     }
   }
@@ -1086,30 +797,22 @@ export class GetPublicAccessBlock extends S3Tool {
     super('GetPublicAccessBlock', 'Retrieves the Public Access Block configuration for a specified bucket, which controls public access settings.', {
       type: 'object',
       properties: {
-        account,
-        region,
+        region: { type: 'string', description: 'The AWS region to use. This is probably ca-central-1 (default), unless otherwise specified.', default: 'ca-central-1' },
         bucketName: {
           type: 'string',
           description: 'The name of the S3 bucket.'
         }
       },
-      required: ['bucketName', 'account', 'region']
+      required: ['bucketName', 'region']
     });
   }
 
   async call(id, args, context, streamManager, user) {
     try {
-      const { account, region, bucketName } = args;
+      const { region, bucketName } = args;
       
-      // Emit initial progress
-      user.emit('tool.output.chunk', {
-        object: 'tool.output.chunk',
-        toolCallId: id,
-        data: `Getting public access block configuration for ${bucketName} in ${account}/${region}...`
-      });
-
       const command = new GetPublicAccessBlockCommand({ Bucket: bucketName });
-      const response = await this.executeWithCommand({ command, account, region });
+      const response = await this.executeWithCommand({ command, region });
       
       return response;
 
@@ -1126,11 +829,6 @@ export class GetPublicAccessBlock extends S3Tool {
         };
       }
       logger.error(`Error getting public access block: ${error.message}`);
-      user.emit('tool.error', {
-        object: 'tool.error',
-        toolCallId: id,
-        data: error.message
-      });
       throw error;
     }
   }
@@ -1144,8 +842,7 @@ export class ListBucketAnalyticsConfigurations extends S3Tool {
     super('ListBucketAnalyticsConfigurations', 'Lists the analytics configurations for the specified bucket.', {
       type: 'object',
       properties: {
-        account,
-        region,
+        region: { type: 'string', description: 'The AWS region to use. This is probably ca-central-1 (default), unless otherwise specified.', default: 'ca-central-1' },
         bucketName: {
           type: 'string',
           description: 'The name of the S3 bucket.'
@@ -1155,36 +852,24 @@ export class ListBucketAnalyticsConfigurations extends S3Tool {
           description: 'Token for the next page of results (optional).'
         }
       },
-      required: ['bucketName', 'account', 'region']
+      required: ['bucketName', 'region']
     });
   }
 
   async call(id, args, context, streamManager, user) {
     try {
-      const { account, region, bucketName, continuationToken } = args;
+      const { region, bucketName, continuationToken } = args;
       
-      // Emit initial progress
-      user.emit('tool.output.chunk', {
-        object: 'tool.output.chunk',
-        toolCallId: id,
-        data: `Listing analytics configurations for bucket ${bucketName} in ${account}/${region}...`
-      });
-
       const command = new ListBucketAnalyticsConfigurationsCommand({ 
         Bucket: bucketName, 
         ContinuationToken: continuationToken 
       });
-      const response = await this.executeWithCommand({ command, account, region });
+      const response = await this.executeWithCommand({ command, region });
       
       return response;
 
     } catch (error) {
       logger.error(`Error listing bucket analytics configurations: ${error.message}`);
-      user.emit('tool.error', {
-        object: 'tool.error',
-        toolCallId: id,
-        data: error.message
-      });
       throw error;
     }
   }
@@ -1198,8 +883,7 @@ export class ListBucketIntelligentTieringConfigurations extends S3Tool {
     super('ListBucketIntelligentTieringConfigurations', 'Lists the S3 Intelligent-Tiering configurations from the specified bucket.', {
       type: 'object',
       properties: {
-        account,
-        region,
+        region: { type: 'string', description: 'The AWS region to use. This is probably ca-central-1 (default), unless otherwise specified.', default: 'ca-central-1' },
         bucketName: {
           type: 'string',
           description: 'The name of the S3 bucket.'
@@ -1209,36 +893,24 @@ export class ListBucketIntelligentTieringConfigurations extends S3Tool {
           description: 'Token for the next page of results (optional).'
         }
       },
-      required: ['bucketName', 'account', 'region']
+      required: ['bucketName', 'region']
     });
   }
 
   async call(id, args, context, streamManager, user) {
     try {
-      const { account, region, bucketName, continuationToken } = args;
+      const { region, bucketName, continuationToken } = args;
       
-      // Emit initial progress
-      user.emit('tool.output.chunk', {
-        object: 'tool.output.chunk',
-        toolCallId: id,
-        data: `Listing Intelligent-Tiering configurations for bucket ${bucketName} in ${account}/${region}...`
-      });
-
       const command = new ListBucketIntelligentTieringConfigurationsCommand({ 
         Bucket: bucketName, 
         ContinuationToken: continuationToken 
       });
-      const response = await this.executeWithCommand({ command, account, region });
+      const response = await this.executeWithCommand({ command, region });
       
       return response;
 
     } catch (error) {
       logger.error(`Error listing bucket Intelligent-Tiering configurations: ${error.message}`);
-      user.emit('tool.error', {
-        object: 'tool.error',
-        toolCallId: id,
-        data: error.message
-      });
       throw error;
     }
   }
@@ -1252,8 +924,7 @@ export class ListBucketInventoryConfigurations extends S3Tool {
     super('ListBucketInventoryConfigurations', 'Lists the inventory configurations for the specified bucket.', {
       type: 'object',
       properties: {
-        account,
-        region,
+        region: { type: 'string', description: 'The AWS region to use. This is probably ca-central-1 (default), unless otherwise specified.', default: 'ca-central-1' },
         bucketName: {
           type: 'string',
           description: 'The name of the S3 bucket.'
@@ -1263,36 +934,24 @@ export class ListBucketInventoryConfigurations extends S3Tool {
           description: 'Token for the next page of results (optional).'
         }
       },
-      required: ['bucketName', 'account', 'region']
+      required: ['bucketName', 'region']
     });
   }
 
   async call(id, args, context, streamManager, user) {
     try {
-      const { account, region, bucketName, continuationToken } = args;
+      const { region, bucketName, continuationToken } = args;
       
-      // Emit initial progress
-      user.emit('tool.output.chunk', {
-        object: 'tool.output.chunk',
-        toolCallId: id,
-        data: `Listing inventory configurations for bucket ${bucketName} in ${account}/${region}...`
-      });
-
       const command = new ListBucketInventoryConfigurationsCommand({ 
         Bucket: bucketName, 
         ContinuationToken: continuationToken 
       });
-      const response = await this.executeWithCommand({ command, account, region });
+      const response = await this.executeWithCommand({ command, region });
       
       return response;
 
     } catch (error) {
       logger.error(`Error listing bucket inventory configurations: ${error.message}`);
-      user.emit('tool.error', {
-        object: 'tool.error',
-        toolCallId: id,
-        data: error.message
-      });
       throw error;
     }
   }
@@ -1306,8 +965,7 @@ export class ListBucketMetricsConfigurations extends S3Tool {
     super('ListBucketMetricsConfigurations', 'Lists the metrics configurations for the specified bucket.', {
       type: 'object',
       properties: {
-        account,
-        region,
+        region: { type: 'string', description: 'The AWS region to use. This is probably ca-central-1 (default), unless otherwise specified.', default: 'ca-central-1' },
         bucketName: {
           type: 'string',
           description: 'The name of the S3 bucket.'
@@ -1317,36 +975,24 @@ export class ListBucketMetricsConfigurations extends S3Tool {
           description: 'Token for the next page of results (optional).'
         }
       },
-      required: ['bucketName', 'account', 'region']
+      required: ['bucketName', 'region']
     });
   }
 
   async call(id, args, context, streamManager, user) {
     try {
-      const { account, region, bucketName, continuationToken } = args;
+      const { region, bucketName, continuationToken } = args;
       
-      // Emit initial progress
-      user.emit('tool.output.chunk', {
-        object: 'tool.output.chunk',
-        toolCallId: id,
-        data: `Listing metrics configurations for bucket ${bucketName} in ${account}/${region}...`
-      });
-
       const command = new ListBucketMetricsConfigurationsCommand({ 
         Bucket: bucketName, 
         ContinuationToken: continuationToken 
       });
-      const response = await this.executeWithCommand({ command, account, region });
+      const response = await this.executeWithCommand({ command, region });
       
       return response;
 
     } catch (error) {
       logger.error(`Error listing bucket metrics configurations: ${error.message}`);
-      user.emit('tool.error', {
-        object: 'tool.error',
-        toolCallId: id,
-        data: error.message
-      });
       throw error;
     }
   }
@@ -1360,8 +1006,7 @@ export class ListObjectVersions extends S3Tool {
     super('ListObjectVersions', 'Returns metadata about all versions of the objects in a bucket.', {
       type: 'object',
       properties: {
-        account,
-        region,
+        region: { type: 'string', description: 'The AWS region to use. This is probably ca-central-1 (default), unless otherwise specified.', default: 'ca-central-1' },
         bucketName: {
           type: 'string',
           description: 'The name of the S3 bucket.'
@@ -1383,21 +1028,14 @@ export class ListObjectVersions extends S3Tool {
           description: 'Specifies the object version you want to start listing from (optional).'
         }
       },
-      required: ['bucketName', 'account', 'region']
+      required: ['bucketName', 'region']
     });
   }
 
   async call(id, args, context, streamManager, user) {
     try {
-      const { account, bucketName, prefix, keyMarker, maxKeys, versionIdMarker } = args;
+      const { bucketName, prefix, keyMarker, maxKeys, versionIdMarker } = args;
       
-      // Emit initial progress
-      user.emit('tool.output.chunk', {
-        object: 'tool.output.chunk',
-        toolCallId: id,
-        data: `Listing object versions for bucket ${bucketName} in ${account}...`
-      });
-
       const command = new ListObjectVersionsCommand({
         Bucket: bucketName,
         Prefix: prefix,
@@ -1405,17 +1043,12 @@ export class ListObjectVersions extends S3Tool {
         MaxKeys: maxKeys,
         VersionIdMarker: versionIdMarker
       });
-      const response = await this.executeWithCommand({ command, account, region: undefined });
+      const response = await this.executeWithCommand({ command, region: undefined });
       
       return response;
 
     } catch (error) {
       logger.error(`Error listing object versions: ${error.message}`);
-      user.emit('tool.error', {
-        object: 'tool.error',
-        toolCallId: id,
-        data: error.message
-      });
       throw error;
     }
   }
@@ -1429,8 +1062,7 @@ export class ListObjects extends S3Tool {
     super('ListObjects', 'Returns some or all of the objects in a bucket.', {
       type: 'object',
       properties: {
-        account,
-        region,
+        region: { type: 'string', description: 'The AWS region to use. This is probably ca-central-1 (default), unless otherwise specified.', default: 'ca-central-1' },
         bucketName: {
           type: 'string',
           description: 'The name of the S3 bucket.'
@@ -1452,21 +1084,14 @@ export class ListObjects extends S3Tool {
           description: 'Sets the maximum number of keys returned in the response (optional).'
         }
       },
-      required: ['bucketName', 'account', 'region']
+      required: ['bucketName', 'region']
     });
   }
 
   async call(id, args, context, streamManager, user) {
     try {
-      const { account, region, bucketName, delimiter, prefix, marker, maxKeys } = args;
+      const { region, bucketName, delimiter, prefix, marker, maxKeys } = args;
       
-      // Emit initial progress
-      user.emit('tool.output.chunk', {
-        object: 'tool.output.chunk',
-        toolCallId: id,
-        data: `Listing objects in bucket ${bucketName} in ${account}/${region}...`
-      });
-
       const command = new ListObjectsCommand({
         Bucket: bucketName,
         Delimiter: delimiter,
@@ -1474,17 +1099,12 @@ export class ListObjects extends S3Tool {
         Marker: marker,
         MaxKeys: maxKeys
       });
-      const response = await this.executeWithCommand({ command, account, region });
+      const response = await this.executeWithCommand({ command, region });
       
       return response;
 
     } catch (error) {
       logger.error(`Error listing objects: ${error.message}`);
-      user.emit('tool.error', {
-        object: 'tool.error',
-        toolCallId: id,
-        data: error.message
-      });
       throw error;
     }
   }
@@ -1498,8 +1118,7 @@ export class ListObjectsV2 extends S3Tool {
     super('ListObjectsV2', 'Returns some or all of the objects in a bucket using version 2 of the API, supporting pagination and additional filtering.', {
       type: 'object',
       properties: {
-        account,
-        region,
+        region: { type: 'string', description: 'The AWS region to use. This is probably ca-central-1 (default), unless otherwise specified.', default: 'ca-central-1' },
         bucketName: {
           type: 'string',
           description: 'The name of the S3 bucket.'
@@ -1530,21 +1149,14 @@ export class ListObjectsV2 extends S3Tool {
           description: 'Specifies the key to start with when listing objects in a bucket (optional).'
         }
       },
-      required: ['bucketName', 'account', 'region']
+      required: ['bucketName', 'region']
     });
   }
 
   async call(id, args, context, streamManager, user) {
     try {
-      const { account, region, bucketName, delimiter, prefix, continuationToken, maxKeys, fetchOwner, startAfter } = args;
+      const { region, bucketName, delimiter, prefix, continuationToken, maxKeys, fetchOwner, startAfter } = args;
       
-      // Emit initial progress
-      user.emit('tool.output.chunk', {
-        object: 'tool.output.chunk',
-        toolCallId: id,
-        data: `Listing objects in bucket ${bucketName} in ${account}/${region}...`
-      });
-
       const command = new ListObjectsV2Command({
         Bucket: bucketName,
         Delimiter: delimiter,
@@ -1554,17 +1166,12 @@ export class ListObjectsV2 extends S3Tool {
         FetchOwner: fetchOwner,
         StartAfter: startAfter
       });
-      const response = await this.executeWithCommand({ command, account, region });
+      const response = await this.executeWithCommand({ command, region });
       
       return response;
 
     } catch (error) {
       logger.error(`Error listing objects: ${error.message}`);
-      user.emit('tool.error', {
-        object: 'tool.error',
-        toolCallId: id,
-        data: error.message
-      });
       throw error;
     }
   }
@@ -1578,8 +1185,7 @@ export class ListParts extends S3Tool {
     super('ListParts', 'Lists the parts that have been uploaded for a specific multipart upload.', {
       type: 'object',
       properties: {
-        account,
-        region,
+        region: { type: 'string', description: 'The AWS region to use. This is probably ca-central-1 (default), unless otherwise specified.', default: 'ca-central-1' },
         bucketName: {
           type: 'string',
           description: 'The name of the S3 bucket.'
@@ -1601,21 +1207,14 @@ export class ListParts extends S3Tool {
           description: 'Sets the maximum number of parts to return in the response (optional).'
         }
       },
-      required: ['bucketName', 'key', 'uploadId', 'account', 'region']
+      required: ['bucketName', 'key', 'uploadId', 'region']
     });
   }
 
   async call(id, args, context, streamManager, user) {
     try {
-      const { account, region, bucketName, key, uploadId, partNumberMarker, maxParts } = args;
+      const { region, bucketName, key, uploadId, partNumberMarker, maxParts } = args;
       
-      // Emit initial progress
-      user.emit('tool.output.chunk', {
-        object: 'tool.output.chunk',
-        toolCallId: id,
-        data: `Listing parts for upload ${uploadId} of ${key} in bucket ${bucketName} (${account}/${region})...`
-      });
-
       const command = new ListPartsCommand({
         Bucket: bucketName,
         Key: key,
@@ -1623,17 +1222,12 @@ export class ListParts extends S3Tool {
         PartNumberMarker: partNumberMarker,
         MaxParts: maxParts
       });
-      const response = await this.executeWithCommand({ command, account, region });
+      const response = await this.executeWithCommand({ command, region });
       
       return response;
 
     } catch (error) {
       logger.error(`Error listing parts: ${error.message}`);
-      user.emit('tool.error', {
-        object: 'tool.error',
-        toolCallId: id,
-        data: error.message
-      });
       throw error;
     }
   }

@@ -4,142 +4,244 @@
 
 The AWS MCP Server is a Dockerized HTTP server designed to expose various AWS SDK functionalities through a collection of JavaScript-based tools. Its primary purpose is to provide a standardized and accessible way to interact with AWS services by making HTTP requests to dynamically generated API endpoints. Each endpoint corresponds to a specific AWS service action defined in the `tools/` directory.
 
-## Prerequisites
+## Quick Start
 
-*   **Docker Desktop** (or any compatible Docker environment) installed and running.
+### Prerequisites
 
-## Building the Docker Image
+- **Docker** and **Docker Compose** installed
+- **AWS credentials** with appropriate permissions
 
-To build the Docker image for the AWS MCP Server, navigate to the root directory of the project (where the `Dockerfile` is located) and run the following command:
+### Basic Setup
 
-```bash
-docker build -t aws-mcp-server .
-```
+1. **Clone and navigate to the repository**
+2. **Create environment file**:
+   ```bash
+   cp .env.example .env
+   # Edit .env with your AWS credentials
+   ```
+3. **Start the server**:
+   ```bash
+   docker-compose up -d
+   ```
+4. **Test the server**:
+   ```bash
+   curl http://localhost:3000/routes
+   ```
 
-This command will build an image tagged `aws-mcp-server`.
+## Deployment Options
 
-## Running the Docker Container
+### Option 1: Standalone with External Access (Default)
 
-To run the Docker container, you need to provide your AWS credentials and the desired AWS region as environment variables. The server uses these to interact with your AWS account.
-
-**Required Environment Variables:**
-
-*   `AWS_ACCESS_KEY_ID`: Your AWS access key ID.
-*   `AWS_SECRET_ACCESS_KEY`: Your AWS secret access key.
-*   `AWS_DEFAULT_REGION`: The default AWS region the server should operate in (e.g., `us-east-1`, `ca-central-1`).
-
-**Optional Environment Variable for AWS:**
-
-*   `AWS_SESSION_TOKEN`: If you are using temporary AWS credentials, provide the session token here.
-
-**Optional Server Port:**
-
-*   `PORT`: The port on which the server will listen. Defaults to `3000` if not set.
-
-**Example `docker run` command:**
+For direct access from outside Docker:
 
 ```bash
-docker run -d \
-  -e AWS_ACCESS_KEY_ID="YOUR_AWS_ACCESS_KEY_ID" \
-  -e AWS_SECRET_ACCESS_KEY="YOUR_AWS_SECRET_ACCESS_KEY" \
-  -e AWS_DEFAULT_REGION="YOUR_AWS_DEFAULT_REGION" \
-  # -e AWS_SESSION_TOKEN="YOUR_SESSION_TOKEN" # Uncomment if using temporary credentials
-  # -e PORT="8080" # Uncomment to change the default port
-  -p 3000:3000 \
-  --name mcp-server \
-  aws-mcp-server
+# In docker-compose.yml, uncomment the ports section:
+ports:
+  - "3000:3000"
+
+docker-compose up -d
 ```
 
-*   `-d`: Runs the container in detached mode (in the background).
-*   `-e VARIABLE="VALUE"`: Sets environment variables.
-*   `-p 3000:3000`: Maps port 3000 on your host to port 3000 in the container. If you set a custom `PORT` environment variable, adjust the container port accordingly (e.g., `-p YOUR_HOST_PORT:$PORT`).
-*   `--name mcp-server`: Assigns a name to the running container for easier management.
-*   `aws-mcp-server`: The name of the image to run.
+Access at: `http://localhost:3000`
 
-## Using the Server
+### Option 2: Internal Docker Network Only
 
-### Discovering Tools
+For integration with other containerized services (like n8n, automation tools):
 
-The server dynamically creates API endpoints based on the tools found in the `tools/` directory. To discover all available tool routes, you can send a GET request to the `/routes` endpoint:
+```bash
+# Set custom network in .env file
+echo "DOCKER_NETWORK=your_network_name" >> .env
+
+# Create or use existing network
+docker network create your_network_name
+
+# Start without external ports (default configuration)
+docker-compose up -d
+```
+
+Access from other containers: `http://aws-mcp-server:3000`
+
+### Option 3: Integration with Existing Docker Compose Stack
+
+Add to your existing `docker-compose.yml`:
+
+```yaml
+services:
+  aws-mcp-server:
+    image: your-registry/aws-mcp-server  # or build: path/to/aws-mcp-server
+    container_name: aws-mcp-server
+    env_file:
+      - path/to/aws-mcp-server/.env
+    networks:
+      - your_existing_network
+    expose:
+      - "3000"
+```
+
+## Environment Variables
+
+Create a `.env` file with the following variables:
+
+```bash
+# Required AWS credentials
+AWS_ACCESS_KEY_ID=your_aws_access_key_id_here
+AWS_SECRET_ACCESS_KEY=your_aws_secret_access_key_here
+AWS_DEFAULT_REGION=us-east-1
+
+# Optional: For temporary credentials
+# AWS_SESSION_TOKEN=your_session_token
+
+# Server configuration
+PORT=3000
+
+# Docker network (optional)
+# DOCKER_NETWORK=your_custom_network_name
+```
+
+### AWS Credentials Options
+
+1. **IAM User**: Create dedicated IAM user with required permissions
+2. **IAM Role**: Use EC2 instance profile or ECS task role
+3. **Temporary Credentials**: Use STS assume role with session token
+4. **AWS CLI Profile**: Mount `~/.aws` directory (not recommended for production)
+
+## Available AWS Services
+
+The server provides **116 tools** across these AWS services:
+
+- **CloudWatch Logs** (9 tools) - Log management and querying
+- **CloudTrail** (2 tools) - API call auditing
+- **Config Service** (19 tools) - Resource configuration tracking
+- **EC2** (16 tools) - Virtual machine management
+- **ECS** (10 tools) - Container orchestration
+- **GuardDuty** (10 tools) - Threat detection
+- **Health Client** (6 tools) - Service health monitoring
+- **IAM** (13 tools) - Identity and access management
+- **Lambda** (12 tools) - Serverless functions
+- **Route 53** (3 tools) - DNS management
+- **S3** (11 tools) - Object storage
+- **SSM** (5 tools) - Systems management
+
+## API Usage
+
+### Discovering Available Tools
 
 ```bash
 curl http://localhost:3000/routes
 ```
 
-This will return a JSON array of available paths and their methods.
+### Calling AWS Tools
 
-### Calling a Tool
-
-All tool functionalities are exposed via `POST` requests. The endpoint path structure is `/tools/{serviceName}/{toolName}`.
-
-*   `{serviceName}`: Derived from the tool's filename (e.g., `EC2Tools.js` becomes `ec2`).
-*   `{toolName}`: The name of the class representing the tool (e.g., `ListBuckets`).
-
-The request body should be a JSON object containing the parameters required by the specific tool. Most tools require a `region` parameter if `AWS_DEFAULT_REGION` is not sufficient or if you need to target a different region for that specific call.
-
-**Example: Listing S3 Buckets**
-
-This tool typically doesn't require parameters beyond what's configured via environment variables for the client, but if you need to specify a region per-call:
+All tools use POST requests to `/tools/{service}/{tool}`:
 
 ```bash
+# List S3 buckets
 curl -X POST http://localhost:3000/tools/s3/ListBuckets \
   -H "Content-Type: application/json" \
-  -d '{
-        "region": "us-east-1"
-      }'
-```
-_(Note: The `ListBuckets` command in S3 is global and doesn't strictly need a region for the API call itself, but the client might be initialized with a region. The refactored tools take `region` as an argument to initialize the client for that specific call.)_
+  -d '{"region": "us-east-1"}'
 
-**Example: Describing EC2 Instances**
-
-To describe specific EC2 instances:
-
-```bash
+# Describe EC2 instances
 curl -X POST http://localhost:3000/tools/ec2/DescribeInstances \
   -H "Content-Type: application/json" \
   -d '{
-        "region": "us-east-1",
-        "instanceIds": ["i-xxxxxxxxxxxxxxxxx", "i-yyyyyyyyyyyyyyyyy"]
-      }'
+    "region": "us-east-1",
+    "instanceIds": ["i-1234567890abcdef0"]
+  }'
 ```
 
-If `instanceIds` is omitted, it may describe all instances (behavior depends on the tool's implementation and AWS SDK defaults).
+## Integration Examples
 
-## Available Toolsets (AWS Services)
+### With n8n Workflow Automation
 
-The server provides tools for interacting with the following AWS services:
+1. Deploy both services on same Docker network
+2. Use HTTP Request nodes in n8n
+3. Set URL to `http://aws-mcp-server:3000/tools/{service}/{tool}`
 
-*   CloudWatch Logs (`cloudwatchlogs`)
-*   CloudTrail (`cloudtrail` or `clouttrail` - based on actual filename)
-*   Config Service (`configservice`)
-*   EC2 (`ec2`)
-*   ECS (`ecs`)
-*   GuardDuty (`guardduty`)
-*   AWS Health (`healthclient`)
-*   IAM (`iam`)
-*   Lambda (`lambda`)
-*   Route 53 (`route53`)
-*   S3 (`s3`)
-*   SSM (Systems Manager) (`ssm`)
+### With Custom Applications
 
-The exact `serviceName` in the URL path will correspond to the lowercase version of the filename (e.g., `EC2Tools.js` -> `ec2`).
+```javascript
+// Example: List S3 buckets from Node.js
+const response = await fetch('http://aws-mcp-server:3000/tools/s3/ListBuckets', {
+  method: 'POST',
+  headers: { 'Content-Type': 'application/json' },
+  body: JSON.stringify({ region: 'us-east-1' })
+});
+const buckets = await response.json();
+```
 
-## Environment Variables
+### With CI/CD Pipelines
 
-The server relies on the following environment variables for configuration:
+```yaml
+# Example: GitHub Actions
+- name: Check AWS Resources
+  run: |
+    curl -X POST http://aws-mcp-server:3000/tools/ec2/DescribeInstances \
+      -H "Content-Type: application/json" \
+      -d '{"region": "us-east-1"}'
+```
 
-**Required for AWS Authentication:**
+## Security Considerations
 
-*   `AWS_ACCESS_KEY_ID`: Your AWS Access Key ID.
-*   `AWS_SECRET_ACCESS_KEY`: Your AWS Secret Access Key.
-*   `AWS_DEFAULT_REGION`: The default AWS region for SDK clients (e.g., `us-east-1`).
+- **Network Isolation**: Use internal Docker networks for production
+- **Credential Management**: Use IAM roles instead of access keys when possible
+- **Access Control**: Implement authentication/authorization layer if needed
+- **Monitoring**: Enable CloudTrail to monitor API usage
 
-**Optional for AWS Authentication:**
+## Development
 
-*   `AWS_SESSION_TOKEN`: Required if using temporary credentials (e.g., from an IAM role assumption).
+### Building from Source
 
-**Optional for Server Configuration:**
+```bash
+git clone <repository-url>
+cd aws-mcp-server
+docker build -t aws-mcp-server .
+```
 
-*   `PORT`: The port on which the Express server will listen. Defaults to `3000`.
+### Local Development
 
-Refer to the `.env.example` file in the repository for a template. When running with Docker, these are passed using the `-e` flag. If running locally (e.g., `node index.js`), you can create a `.env` file.
+```bash
+npm install
+cp .env.example .env
+# Edit .env with your credentials
+npm start
+```
+
+### Adding New Tools
+
+1. Create new tool class in `tools/` directory
+2. Follow existing patterns for parameter validation
+3. Export tool in the service module
+4. Restart server to load new tools
+
+## Troubleshooting
+
+### Common Issues
+
+1. **Container won't start**: Check `.env` file exists and has valid AWS credentials
+2. **Network connectivity**: Ensure containers are on the same Docker network
+3. **AWS permissions**: Verify IAM user/role has required permissions
+4. **Port conflicts**: Change PORT environment variable if 3000 is in use
+
+### Debugging
+
+```bash
+# View container logs
+docker logs aws-mcp-server
+
+# Test network connectivity from another container
+docker exec other-container curl http://aws-mcp-server:3000/routes
+
+# Validate AWS credentials
+docker exec aws-mcp-server aws sts get-caller-identity
+```
+
+## Contributing
+
+1. Fork the repository
+2. Create feature branch
+3. Add tests for new functionality
+4. Submit pull request
+
+## License
+
+[Add your license information here]

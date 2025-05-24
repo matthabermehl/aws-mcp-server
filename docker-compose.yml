@@ -1,0 +1,27 @@
+version: '3.8'
+
+services:
+  aws-mcp-server:
+    build: .
+    container_name: aws-mcp-server
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      - PORT=3000
+    networks:
+      - ${DOCKER_NETWORK:-default}
+    # Expose port internally to Docker network only
+    # For external access, uncomment the ports section below
+    expose:
+      - "3000"
+    # ports:
+    #   - "3000:3000"  # Uncomment for external access
+
+networks:
+  # Use external network if specified, otherwise create default
+  default:
+    external: false
+  # Example for external network (uncomment and configure as needed)
+  # custom_network:
+  #   external: true 

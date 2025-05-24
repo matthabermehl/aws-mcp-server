@@ -4,10 +4,8 @@ FROM node:18-slim
 # Set the working directory in the container
 WORKDIR /usr/src/app
 
-# Create a non-root user and group
-# Using 'node' as the username to align with common practices for Node.js images
-RUN addgroup --system --gid 1001 node && \
-    adduser --system --uid 1001 --ingroup node node
+# The node:18-slim image already includes a 'node' user and group
+# So we don't need to create them - we'll use the existing ones
 
 # Copy package.json and package-lock.json (if available)
 # package-lock.json should be available after npm install from the previous step

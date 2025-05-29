@@ -8,6 +8,9 @@ const logger = {
   error: (...args) => {
     console.error(...args);
   },
+  debug: (...args) => {
+    console.debug(...args);
+  }
 };
 
 export default logger;

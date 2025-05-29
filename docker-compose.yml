@@ -19,9 +19,12 @@ services:
     #   - "3000:3000"  # Uncomment for external access
 
 networks:
-  # Use external network if specified, otherwise create default
+  # Default network (used when DOCKER_NETWORK is not set)
   default:
     external: false
+  # External network (used when DOCKER_NETWORK is set to an existing network)
+  run_lbnet:
+    external: true
   # Example for external network (uncomment and configure as needed)
   # custom_network:
   #   external: true 
